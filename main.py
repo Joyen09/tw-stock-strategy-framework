@@ -57,6 +57,7 @@ def cmd_backtest(args):
         position_pct=args.position_pct,
         fee_discount=args.fee_discount,
         allow_odd_lot=not args.whole_lot,
+        cooldown_days=args.cooldown,
     )
     result = bt.run(strat, symbols, args.start, args.end)
 
@@ -172,6 +173,7 @@ def build_parser():
     bt.add_argument("--source", choices=["sample", "finmind"], default="sample")
     bt.add_argument("--trades", action="store_true", help="印出交易明細")
     bt.add_argument("--whole-lot", action="store_true", help="只買整張(1000股)；預設可買零股")
+    bt.add_argument("--cooldown", type=int, default=5, help="賣出後幾個交易日內不重買 (防洗盤)，0=關閉")
     bt.set_defaults(func=cmd_backtest)
 
     sc = sub.add_parser("scan", help="掃描產生交易訊號 (模擬/實單)")

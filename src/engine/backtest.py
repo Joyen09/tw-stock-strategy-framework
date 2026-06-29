@@ -94,12 +94,15 @@ class Backtester:
         fee_discount: float = 0.28,
         warmup: int = 250,
         allow_odd_lot: bool = True,
+        cooldown_days: int = 5,
     ):
         self.provider = provider
         self.initial_cash = initial_cash
         self.position_pct = position_pct
         self.fee_discount = fee_discount
         self.warmup = warmup
+        # 防洗盤：賣出後 N 個交易日內不重買同一檔，避免在均線上下來回被巴手續費。
+        self.cooldown_days = cooldown_days
         # 允許零股 (1 股為單位)；台股盤中零股可交易，貴的股票小資金也買得到。
         self.allow_odd_lot = allow_odd_lot
 
@@ -122,6 +125,7 @@ class Backtester:
 
         equity = []
         trades: List[Trade] = []
+        cooldown_until: Dict[str, int] = {}  # 每檔賣出後，到第幾根才可再買
 
         for i, date in enumerate(all_dates):
             if i < self.warmup:
@@ -149,6 +153,8 @@ class Backtester:
                 sig = strategy.evaluate(ctx)
 
                 if sig.action == Action.BUY and pos.shares == 0:
+                    if i < cooldown_until.get(sym, 0):  # 冷卻期內，跳過買進
+                        continue
                     budget = per_lot_budget * sig.strength
                     if self.allow_odd_lot:
                         shares = int(budget // price)               # 零股：1 股為單位
@@ -161,6 +167,7 @@ class Backtester:
                 elif sig.action == Action.SELL and pos.shares > 0:
                     order = broker.place_order(Order(sym, OrderSide.SELL, pos.shares, price, sig.reason))
                     if order.filled:
+                        cooldown_until[sym] = i + self.cooldown_days
                         trades.append(Trade(date, sym, "SELL", order.shares, price, sig.reason))
 
             equity.append((date, self._equity(broker, data, date)))
