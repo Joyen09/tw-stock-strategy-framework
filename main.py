@@ -112,6 +112,35 @@ def cmd_backtest(args):
             print(f"{t.date.date()} {t.side:<4} {t.symbol} {t.shares:>6} @ {t.price:>8.2f}  {t.reason}")
 
 
+def cmd_compare(args):
+    """一次回測多個策略，按夏普值排名輸出比較表。"""
+    from src.data.cache import CachingProvider
+
+    provider = CachingProvider(_provider(args))
+    symbols = args.symbols.split(",") if args.symbols else provider.universe()
+    names = args.strategy.split(",") if args.strategy else list(strategies.REGISTRY)
+
+    print(f"比較 {len(names)} 個策略 × {len(symbols)} 檔股票（{args.start} ~ {args.end}），請稍候...\n")
+    rows = []
+    for name in names:
+        try:
+            strat = strategies.build(name)
+            bt = Backtester(provider, initial_cash=args.cash, fee_discount=args.fee_discount,
+                            cooldown_days=args.cooldown)
+            r = bt.run(strat, symbols, args.start, args.end)
+            rows.append((name, r.total_return, r.cagr, r.max_drawdown, r.sharpe, len(r.trades)))
+        except Exception as e:
+            print(f"  {name} 失敗: {e}")
+
+    rows.sort(key=lambda x: x[4], reverse=True)  # 依夏普值由高到低
+    print(f"{'排名':<4}{'策略':<14}{'總報酬':>9}{'年化':>8}{'最大回撤':>10}{'夏普':>7}{'交易數':>7}")
+    print("-" * 60)
+    for i, (name, tr, cagr, mdd, sharpe, n) in enumerate(rows, 1):
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i:>2}"
+        print(f"{medal:<4}{name:<14}{tr:>8.2%}{cagr:>8.2%}{mdd:>10.2%}{sharpe:>7.2f}{n:>7}")
+    print("\n夏普值越高代表『風險調整後報酬』越好（同樣賺，波動越小越優）。")
+
+
 def cmd_scan(args):
     provider = _provider(args)
     symbols = args.symbols.split(",") if args.symbols else provider.universe()
@@ -285,6 +314,17 @@ def build_parser():
     sc.add_argument("--realtime", action="store_true", help="盤中用 Shioaji 即時報價更新今日 K (不下單也可)")
     sc.add_argument("--real-account", action="store_true", help="Shioaji 用實單帳戶 (預設模擬盤)")
     sc.set_defaults(func=cmd_scan)
+
+    cp = sub.add_parser("compare", help="批次比較：所有策略跑同一批股票，按夏普排名")
+    cp.add_argument("--symbols", default="", help="逗號分隔股票；留空用樣本股")
+    cp.add_argument("--strategy", default="", help="逗號分隔策略；留空=全部")
+    cp.add_argument("--start", default="2024-01-01")
+    cp.add_argument("--end", default="2025-12-31")
+    cp.add_argument("--cash", type=float, default=1_000_000)
+    cp.add_argument("--fee-discount", type=float, default=0.28)
+    cp.add_argument("--cooldown", type=int, default=5)
+    cp.add_argument("--source", choices=["sample", "finmind"], default="sample")
+    cp.set_defaults(func=cmd_compare)
 
     sg = sub.add_parser("screen", help="選股：列出今日各策略的買進名單")
     sg.add_argument("--symbols", default="", help="逗號分隔股票；留空用 --universe")

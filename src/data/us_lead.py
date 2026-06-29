@@ -44,8 +44,11 @@ class USLeadProvider:
         if proxy in self._failed:
             return None
         try:
+            import logging
+
             import yfinance as yf
 
+            logging.getLogger("yfinance").setLevel(logging.CRITICAL)  # 關掉抓取失敗的雜訊
             df = yf.download(proxy, period=self.lookback, progress=False, auto_adjust=True)
             close = df["Close"]
             if hasattr(close, "columns"):  # 多層欄位時取第一欄
