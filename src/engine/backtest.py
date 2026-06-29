@@ -93,12 +93,15 @@ class Backtester:
         position_pct: float = 0.2,
         fee_discount: float = 0.28,
         warmup: int = 250,
+        allow_odd_lot: bool = True,
     ):
         self.provider = provider
         self.initial_cash = initial_cash
         self.position_pct = position_pct
         self.fee_discount = fee_discount
         self.warmup = warmup
+        # 允許零股 (1 股為單位)；台股盤中零股可交易，貴的股票小資金也買得到。
+        self.allow_odd_lot = allow_odd_lot
 
     def run(
         self,
@@ -146,8 +149,11 @@ class Backtester:
                 sig = strategy.evaluate(ctx)
 
                 if sig.action == Action.BUY and pos.shares == 0:
-                    lots = max(0, int((per_lot_budget * sig.strength) // (price * LOT)))
-                    shares = lots * LOT
+                    budget = per_lot_budget * sig.strength
+                    if self.allow_odd_lot:
+                        shares = int(budget // price)               # 零股：1 股為單位
+                    else:
+                        shares = int(budget // (price * LOT)) * LOT  # 整張：1000 股為單位
                     if shares > 0:
                         order = broker.place_order(Order(sym, OrderSide.BUY, shares, price, sig.reason))
                         if order.filled:

@@ -56,6 +56,7 @@ def cmd_backtest(args):
         initial_cash=args.cash,
         position_pct=args.position_pct,
         fee_discount=args.fee_discount,
+        allow_odd_lot=not args.whole_lot,
     )
     result = bt.run(strat, symbols, args.start, args.end)
 
@@ -170,6 +171,7 @@ def build_parser():
     bt.add_argument("--fee-discount", type=float, default=0.28)
     bt.add_argument("--source", choices=["sample", "finmind"], default="sample")
     bt.add_argument("--trades", action="store_true", help="印出交易明細")
+    bt.add_argument("--whole-lot", action="store_true", help="只買整張(1000股)；預設可買零股")
     bt.set_defaults(func=cmd_backtest)
 
     sc = sub.add_parser("scan", help="掃描產生交易訊號 (模擬/實單)")

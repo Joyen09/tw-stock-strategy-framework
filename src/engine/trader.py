@@ -41,6 +41,7 @@ class LiveTrader:
         lookback_days: int = 400,
         quote_fn=None,
         notifier=None,
+        allow_odd_lot: bool = True,
     ):
         self.provider = provider
         self.broker = broker
@@ -48,6 +49,7 @@ class LiveTrader:
         self.position_budget = position_budget
         self.dry_run = dry_run
         self.lookback_days = lookback_days
+        self.allow_odd_lot = allow_odd_lot
         # quote_fn(symbol) -> 即時價 (盤中用)，把今天這根 K 換成現價，讓突破/停損即時生效。
         self.quote_fn = quote_fn
         self.notifier = notifier
@@ -109,8 +111,11 @@ class LiveTrader:
                 continue
 
             if sig.action == Action.BUY and pos is None:
-                lots = int((self.position_budget * sig.strength) // (price * LOT))
-                shares = lots * LOT
+                budget = self.position_budget * sig.strength
+                if self.allow_odd_lot:
+                    shares = int(budget // price)               # 零股
+                else:
+                    shares = int(budget // (price * LOT)) * LOT  # 整張
                 if shares <= 0:
                     continue
                 plan = TradePlan(sym, "BUY", shares, price, sig.reason)
