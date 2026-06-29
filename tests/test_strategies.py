@@ -58,6 +58,32 @@ def test_backtest_runs_and_reports():
     _ = (result.total_return, result.cagr, result.max_drawdown, result.sharpe)
 
 
+def test_us_overnight_buys_on_strong_overnight():
+    """注入合成隔夜資料：大漲日應出 BUY、大跌日持倉應 SELL。"""
+    from src.data.us_lead import USLeadProvider
+    from src.strategies.us_overnight import USOvernightStrategy
+    from src.models import Position
+
+    dates = pd.bdate_range(end="2025-12-31", periods=40)
+    # 前 39 天緩漲建立均線之上趨勢，最後一天美股隔夜大漲
+    overnight = pd.Series([0.0] * 39 + [0.03], index=dates)
+    lead = USLeadProvider(series_map={"^SOX": overnight, "TSM": overnight})
+    strat = USOvernightStrategy(lead_provider=lead, up_threshold=0.015, trend_ma=20, exit_ma=10)
+
+    close = pd.Series(range(100, 140), index=dates, dtype=float)  # 穩定上升趨勢
+    prices = pd.DataFrame({"open": close, "high": close, "low": close, "close": close,
+                           "volume": [1000] * 40})
+    sig = strat.evaluate(StrategyContext("2330", prices))
+    assert sig.action == Action.BUY
+
+    # 大跌隔夜 + 持倉 → SELL
+    overnight2 = pd.Series([0.0] * 39 + [-0.03], index=dates)
+    lead2 = USLeadProvider(series_map={"^SOX": overnight2, "TSM": overnight2})
+    strat2 = USOvernightStrategy(lead_provider=lead2, down_threshold=0.015)
+    sig2 = strat2.evaluate(StrategyContext("2330", prices, position=Position("2330", 1000, 100)))
+    assert sig2.action == Action.SELL
+
+
 def test_all_strategies_backtest_without_error():
     provider = SampleDataProvider()
     bt = Backtester(provider, warmup=250)

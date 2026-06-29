@@ -5,6 +5,9 @@ numpy>=1.24
 # 真實台股資料 (選用) — FinMind 免費，申請 token: https://finmindtrade.com
 FinMind>=1.5
 
+# 美股隔夜資料 (選用) — us_overnight 策略用，抓 ^SOX / TSM ADR
+yfinance>=0.2
+
 # 永豐金證券下單 API (選用) — 需券商帳戶與憑證
 shioaji>=1.2
 
