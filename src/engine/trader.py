@@ -39,6 +39,8 @@ class LiveTrader:
         position_budget: float = 200_000.0,
         dry_run: bool = True,
         lookback_days: int = 400,
+        quote_fn=None,
+        notifier=None,
     ):
         self.provider = provider
         self.broker = broker
@@ -46,6 +48,34 @@ class LiveTrader:
         self.position_budget = position_budget
         self.dry_run = dry_run
         self.lookback_days = lookback_days
+        # quote_fn(symbol) -> 即時價 (盤中用)，把今天這根 K 換成現價，讓突破/停損即時生效。
+        self.quote_fn = quote_fn
+        self.notifier = notifier
+
+    def _apply_realtime(self, df: pd.DataFrame, symbol: str, end: str) -> pd.DataFrame:
+        """盤中用即時報價更新/補上「今天」這根 K，使日線策略能即時反應。"""
+        if self.quote_fn is None:
+            return df
+        try:
+            live = self.quote_fn(symbol)
+        except Exception as e:  # 取價失敗就用原始日 K，不中斷
+            print(f"[realtime] {symbol} 取即時價失敗: {e}")
+            return df
+        if not live or live <= 0:
+            return df
+        today = pd.Timestamp(end).normalize()
+        df = df.copy()
+        if df.index[-1].normalize() == today:
+            df.iloc[-1, df.columns.get_loc("close")] = live
+            df.iloc[-1, df.columns.get_loc("high")] = max(df["high"].iloc[-1], live)
+            df.iloc[-1, df.columns.get_loc("low")] = min(df["low"].iloc[-1], live)
+        else:
+            row = df.iloc[-1].copy()
+            row["open"] = row["high"] = row["low"] = row["close"] = live
+            row["volume"] = 0
+            df = pd.concat([df, row.to_frame().T])
+            df.index = list(df.index[:-1]) + [today]
+        return df
 
     def _current_position(self, symbol: str) -> Optional[Position]:
         for p in self.broker.positions():
@@ -63,6 +93,7 @@ class LiveTrader:
             df = self.provider.history(sym, start, end)
             if df.empty:
                 continue
+            df = self._apply_realtime(df, sym, end)
             price = float(df["close"].iloc[-1])
             pos = self._current_position(sym)
             b = bench.reindex(df.index).ffill() if bench is not None else None
@@ -94,4 +125,16 @@ class LiveTrader:
                 plan.sent = True
             plans.append(plan)
 
+        self._notify(plans, end)
         return plans
+
+    def _notify(self, plans: List[TradePlan], end: str):
+        """有訊號就推 Telegram；無訊號不推，避免洗版。"""
+        if not plans or self.notifier is None or not getattr(self.notifier, "enabled", False):
+            return
+        mode = "✅ 已下單" if not self.dry_run else "🧪 模擬(未下單)"
+        lines = [f"<b>📈 {self.strategy.name} 策略訊號</b> ({end}) {mode}"]
+        for p in plans:
+            emoji = "🟢買" if p.action == "BUY" else "🔴賣"
+            lines.append(f"{emoji} <b>{p.symbol}</b> {p.shares}股 @ {p.price:.2f}\n　{p.reason}")
+        self.notifier.send("\n".join(lines))

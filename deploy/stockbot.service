@@ -13,8 +13,9 @@ User=YOUR_USER
 WorkingDirectory=/home/YOUR_USER/stock
 # 實單金鑰請放在這個 EnvironmentFile（chmod 600，且已被 .gitignore 忽略）
 EnvironmentFile=-/home/YOUR_USER/stock/.env
-# 預設 dry-run（不真的下單）；確認無誤後把 --live 加上去
-ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py scan --strategy oneil --source finmind
+# 預設 dry-run（不真的下單）+ 盤中即時報價 + Telegram 通知。
+# 確認連續幾天訊號正常後，再把結尾改成「--live --real-account」開始實單。
+ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py scan --strategy oneil --source finmind --realtime
 
 # 資源上限：避免萬一吃爆記憶體影響同台的其他服務（如 pionex-bot）
 MemoryMax=400M

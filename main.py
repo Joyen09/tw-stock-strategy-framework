@@ -73,16 +73,61 @@ def cmd_scan(args):
     provider = _provider(args)
     symbols = args.symbols.split(",") if args.symbols else provider.universe()
     strat = strategies.build(args.strategy)
-    broker = PaperBroker(cash=args.cash)
-    trader = LiveTrader(provider, broker, strat, position_budget=args.budget, dry_run=not args.live)
+    # Telegram 通知 (環境變數有設才會啟用)
+    from src.notify import TelegramNotifier
+    notifier = TelegramNotifier()
+
+    # 實單 / 盤中即時報價：用 Shioaji 當下單券商與即時價來源
+    quote_fn = None
+    if args.live or args.realtime:
+        from src.broker.shioaji_broker import ShioajiBroker
+        broker = ShioajiBroker(simulation=not args.real_account)
+        quote_fn = broker.realtime_quote
+    else:
+        broker = PaperBroker(cash=args.cash)
+
+    trader = LiveTrader(
+        provider, broker, strat,
+        position_budget=args.budget,
+        dry_run=not args.live,
+        quote_fn=quote_fn,
+        notifier=notifier,
+    )
     plans = trader.scan(symbols, args.end)
 
     mode = "實單" if args.live else "DRY-RUN (未送單)"
-    print(f"\n=== 掃描結果 [{mode}]：{args.strategy} @ {args.end} ===")
+    rt = " +即時報價" if quote_fn else ""
+    print(f"\n=== 掃描結果 [{mode}{rt}]：{args.strategy} @ {args.end} ===")
     if not plans:
         print("本輪無交易訊號。")
     for p in plans:
         print(f"  {p.action:<4} {p.symbol} {p.shares:>6} 股 @ {p.price:>8.2f}  {p.reason}")
+    if notifier.enabled and plans:
+        print(f"（已推送 {len(plans)} 筆訊號到 Telegram）")
+
+
+def cmd_notify_test(args):
+    from src.notify import TelegramNotifier
+    n = TelegramNotifier()
+    if not n.enabled:
+        print("未設定 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID，無法測試。")
+        return
+    ok = n.send("✅ 台股策略 bot 測試訊息，通知設定成功！")
+    print("已送出測試訊息。" if ok else "送出失敗，請檢查 token / chat_id。")
+
+
+def cmd_notify_chatid(args):
+    from src.notify import TelegramNotifier
+    n = TelegramNotifier()
+    if not n.token:
+        print("請先設定 TELEGRAM_BOT_TOKEN。")
+        return
+    print("先對你的 bot 傳一句話 (例如 hi)，再執行本指令。\n")
+    chats = n.get_chat_ids()
+    if not chats:
+        print("查不到對話。請先在 Telegram 對 bot 發一則訊息後再試。")
+    for c in chats:
+        print(f"  chat_id={c['chat_id']}   ({c['name']})")
 
 
 def build_parser():
@@ -112,7 +157,12 @@ def build_parser():
     sc.add_argument("--budget", type=float, default=200_000, help="單檔最大投入金額")
     sc.add_argument("--source", choices=["sample", "finmind"], default="sample")
     sc.add_argument("--live", action="store_true", help="真的送單 (預設只 dry-run)")
+    sc.add_argument("--realtime", action="store_true", help="盤中用 Shioaji 即時報價更新今日 K (不下單也可)")
+    sc.add_argument("--real-account", action="store_true", help="Shioaji 用實單帳戶 (預設模擬盤)")
     sc.set_defaults(func=cmd_scan)
+
+    sub.add_parser("notify-test", help="送一則 Telegram 測試訊息").set_defaults(func=cmd_notify_test)
+    sub.add_parser("notify-chatid", help="查詢自己的 Telegram chat_id").set_defaults(func=cmd_notify_chatid)
     return p
 
 

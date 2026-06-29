@@ -7,11 +7,13 @@
 [Unit]
 Description=Run stock scan daily after market close
 
+# 注意：請先把 VM 時區設成台北，否則時間會對不上：
+#   sudo timedatectl set-timezone Asia/Taipei
 [Timer]
-# 台北時間每天 14:05（台股 13:30 收盤後）。
-# 注意：VM 時區若為 UTC，請改成 06:05，或先 `sudo timedatectl set-timezone Asia/Taipei`
-OnCalendar=Mon-Fri 14:05
-Persistent=true
+# 台股盤中 (09:00–13:30) 每 5 分鐘掃一次。
+# 09..13:00/5 = 09~13 時、每 5 分鐘 (含 13:00~13:30，13:30 後幾筆無妨)。
+OnCalendar=Mon-Fri 09..13:00/5
+Persistent=false
 
 [Install]
 WantedBy=timers.target

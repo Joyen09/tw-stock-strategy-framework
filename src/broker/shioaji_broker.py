@@ -64,6 +64,17 @@ class ShioajiBroker(Broker):
         order.note += f" | 已送單 status={getattr(trade.status, 'status', '?')}"
         return order
 
+    def realtime_quote(self, symbol: str) -> Optional[float]:
+        """盤中即時成交價 (snapshot)，給 LiveTrader 當作今日 K 的現價。"""
+        try:
+            contract = self.api.Contracts.Stocks[symbol]
+            snap = self.api.snapshots([contract])
+            if snap:
+                return float(snap[0].close)
+        except Exception as e:  # pragma: no cover - 盤外/網路問題
+            print(f"[Shioaji] {symbol} 取即時報價失敗: {e}")
+        return None
+
     def positions(self) -> List[Position]:
         result = []
         for p in self.api.list_positions(self.api.stock_account):

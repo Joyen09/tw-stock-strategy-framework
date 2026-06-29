@@ -46,9 +46,29 @@ cat > ~/stock/.env <<'EOF'
 FINMIND_TOKEN=你的token
 SHIOAJI_API_KEY=...
 SHIOAJI_SECRET_KEY=...
+# Telegram 通知（見步驟五）
+TELEGRAM_BOT_TOKEN=123456:ABC...
+TELEGRAM_CHAT_ID=你的chat_id
 EOF
 chmod 600 ~/stock/.env
 ```
+
+## 步驟五：Telegram 通知設定
+
+1. 在 Telegram 搜尋 **@BotFather**，輸入 `/newbot`，照指示命名，拿到 **bot token**。
+2. 在 Telegram 點開你的新 bot，對它**傳一句話**（例如 `hi`）。
+3. 在 VM 上查自己的 chat_id：
+   ```bash
+   cd ~/stock && source .venv/bin/activate
+   export TELEGRAM_BOT_TOKEN="上一步拿到的 token"
+   python main.py notify-chatid          # 會印出 chat_id
+   ```
+4. 把 `TELEGRAM_BOT_TOKEN` 與 `TELEGRAM_CHAT_ID` 填進 `~/stock/.env`，然後測試：
+   ```bash
+   python main.py notify-test            # 手機應收到「測試訊息」
+   ```
+
+之後只要掃描掃到買/賣訊號，就會自動推播到你的 Telegram（沒訊號不推，不會洗版）。
 
 > ⚠️ 第一次務必 `simulation=True` + `dry_run`（service 預設沒加 `--live`，就是不真的下單）。確認連續幾天訊號正常，再把 `--live` 加進 `ExecStart`。
 
@@ -63,7 +83,7 @@ sudo cp deploy/stockbot.service /etc/systemd/system/
 sudo cp deploy/stockbot.timer   /etc/systemd/system/
 sudo systemctl daemon-reload
 
-# 3. 設定時區（台股收盤時間）
+# 3. 設定時區（很重要！否則排程時間對不上台股盤中）
 sudo timedatectl set-timezone Asia/Taipei
 
 # 4. 啟用排程
@@ -75,14 +95,19 @@ sudo systemctl start stockbot.service
 journalctl -u stockbot.service -n 50 --no-pager
 ```
 
-完成後，VM 會在每個交易日 14:05 自動跑一次策略掃描；關機重開也會自動恢復排程。
+完成後，VM 會在**每個交易日盤中 09:00–13:30、每 5 分鐘**自動掃描一次（`stockbot.timer` 已設定好），掃到訊號就推 Telegram；關機重開也會自動恢復排程。
 
 ---
 
+## 關於「每 5 分鐘掃描」與下單時效
+
+- **下單很快**：Shioaji 送單是毫秒~秒級，有訊號就來得及。
+- **重點是即時報價**：service 已加 `--realtime`，盤中會用 **Shioaji 即時成交價**當作「今天這根 K 的現價」，所以**突破策略（李佛摩 / 歐尼爾）在盤中就會即時觸發**，不必等收盤。
+- **日 K 的限制**：像巴菲特 / 葛拉漢這種**基本面**策略，本來就是看年/季趨勢，盤中每 5 分鐘掃意義不大；建議這類策略用 `OnCalendar=Mon-Fri 14:00`（收盤後一天一次）即可。**動能突破型**策略才適合 5 分鐘盤中掃。
+- 想更快（如每 1 分鐘）：把 timer 的 `00/5` 改成 `00/1`。但 FinMind 免費額度有限，頻率太高建議改用 Shioaji 的歷史 K 線當資料源。
+
 ## 為什麼用 systemd timer 而不是 cron？
 
-- 開機自動恢復、`Persistent=true` 可補跑錯過的排程。
+- 開機自動恢復、可補跑錯過的排程。
 - 直接用 `MemoryMax` / `CPUQuota` 限制資源，**保證不會吃爆 VM 影響到 pionex-bot**。
 - log 用 `journalctl` 集中查看，比 cron 好除錯。
-
-要改成盤中每 5 分鐘掃一次，把 timer 的 `OnCalendar` 改成 `*:0/5` 即可。
