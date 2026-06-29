@@ -15,11 +15,11 @@ WorkingDirectory=/home/YOUR_USER/stock
 EnvironmentFile=-/home/YOUR_USER/stock/.env
 # 三種模式（擇一，把對應那行的 # 拿掉）。--regime=大盤空頭禁買 (回測證實能保本，建議保留)：
 #  A. 純通知 dry-run（不下單，只推 Telegram）—— 最安全
-# ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py scan --strategy lynch --source finmind --realtime --regime
+# ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py scan --strategy lynch --source finmind --realtime --regime --notify
 #  B. Shioaji 模擬盤全自動（假錢自動下單）—— 目前選用，--live 但無 --real-account=模擬
-ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py scan --strategy lynch --source finmind --realtime --regime --live
+ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py scan --strategy lynch --source finmind --realtime --regime --live --notify
 #  C. 實單全自動（真錢！需先設定憑證 SHIOAJI_CA_PATH 等）—— 確認模擬盤穩定才開
-# ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py scan --strategy lynch --source finmind --realtime --regime --live --real-account
+# ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py scan --strategy lynch --source finmind --realtime --regime --live --real-account --notify
 
 # 資源上限：避免萬一吃爆記憶體影響同台的其他服務（如 pionex-bot）
 MemoryMax=400M

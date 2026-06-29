@@ -146,9 +146,11 @@ def cmd_scan(args):
     provider = _provider(args)
     symbols = args.symbols.split(",") if args.symbols else provider.universe()
     strat = strategies.build(args.strategy)
-    # Telegram 通知 (環境變數有設才會啟用)
-    from src.notify import TelegramNotifier
-    notifier = TelegramNotifier()
+    # Telegram 通知：加 --notify 且環境變數有設才會啟用
+    notifier = None
+    if args.notify:
+        from src.notify import TelegramNotifier
+        notifier = TelegramNotifier()
 
     # 實單 / 盤中即時報價：用 Shioaji 當下單券商與即時價來源
     quote_fn = None
@@ -176,7 +178,7 @@ def cmd_scan(args):
         print("本輪無交易訊號。")
     for p in plans:
         print(f"  {p.action:<4} {p.symbol} {p.shares:>6} 股 @ {p.price:>8.2f}  {p.reason}")
-    if notifier.enabled and plans:
+    if notifier and notifier.enabled and plans:
         print(f"（已推送 {len(plans)} 筆訊號到 Telegram）")
 
 
@@ -317,6 +319,7 @@ def build_parser():
     sc.add_argument("--realtime", action="store_true", help="盤中用 Shioaji 即時報價更新今日 K (不下單也可)")
     sc.add_argument("--real-account", action="store_true", help="Shioaji 用實單帳戶 (預設模擬盤)")
     sc.add_argument("--regime", action="store_true", help="大盤風向濾網：跌破年線時禁止做多 (建議開啟)")
+    sc.add_argument("--notify", action="store_true", help="把交易訊號推到 Telegram")
     sc.set_defaults(func=cmd_scan)
 
     cp = sub.add_parser("compare", help="批次比較：所有策略跑同一批股票，按夏普排名")
