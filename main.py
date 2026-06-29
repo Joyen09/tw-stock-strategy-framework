@@ -99,6 +99,7 @@ def cmd_backtest(args):
         fee_discount=args.fee_discount,
         allow_odd_lot=not args.whole_lot,
         cooldown_days=args.cooldown,
+        regime_filter=args.regime,
     )
     result = bt.run(strat, symbols, args.start, args.end)
 
@@ -126,7 +127,7 @@ def cmd_compare(args):
         try:
             strat = strategies.build(name)
             bt = Backtester(provider, initial_cash=args.cash, fee_discount=args.fee_discount,
-                            cooldown_days=args.cooldown)
+                            cooldown_days=args.cooldown, regime_filter=args.regime)
             r = bt.run(strat, symbols, args.start, args.end)
             rows.append((name, r.total_return, r.cagr, r.max_drawdown, r.sharpe, len(r.trades)))
         except Exception as e:
@@ -301,6 +302,7 @@ def build_parser():
     bt.add_argument("--whole-lot", action="store_true", help="只買整張(1000股)；預設可買零股")
     bt.add_argument("--cooldown", type=int, default=5, help="賣出後幾個交易日內不重買 (防洗盤)，0=關閉")
     bt.add_argument("--params", default="", help="覆寫策略參數，如 'up_threshold=0.02,down_threshold=0.03'")
+    bt.add_argument("--regime", action="store_true", help="大盤風向濾網：加權指數跌破年線時禁止做多")
     bt.set_defaults(func=cmd_backtest)
 
     sc = sub.add_parser("scan", help="掃描產生交易訊號 (模擬/實單)")
@@ -323,6 +325,7 @@ def build_parser():
     cp.add_argument("--cash", type=float, default=1_000_000)
     cp.add_argument("--fee-discount", type=float, default=0.28)
     cp.add_argument("--cooldown", type=int, default=5)
+    cp.add_argument("--regime", action="store_true", help="大盤風向濾網：跌破年線時禁止做多")
     cp.add_argument("--source", choices=["sample", "finmind"], default="sample")
     cp.set_defaults(func=cmd_compare)
 

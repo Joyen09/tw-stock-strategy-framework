@@ -95,6 +95,8 @@ class Backtester:
         warmup: int = 250,
         allow_odd_lot: bool = True,
         cooldown_days: int = 5,
+        regime_filter: bool = False,
+        regime_ma: int = 200,
     ):
         self.provider = provider
         self.initial_cash = initial_cash
@@ -105,6 +107,9 @@ class Backtester:
         self.cooldown_days = cooldown_days
         # 允許零股 (1 股為單位)；台股盤中零股可交易，貴的股票小資金也買得到。
         self.allow_odd_lot = allow_odd_lot
+        # 大盤風向濾網：加權指數在年線(regime_ma)之下=空頭，禁止做多 (只准出場)。
+        self.regime_filter = regime_filter
+        self.regime_ma = regime_ma
 
     def run(
         self,
@@ -122,6 +127,11 @@ class Backtester:
         # 統一交易日曆 (所有股票日期聯集)。
         all_dates = sorted(set().union(*[set(df.index) for df in data.values() if not df.empty]))
         per_lot_budget = self.initial_cash * self.position_pct
+
+        # 預算大盤年線，供風向濾網用。
+        regime_ma_series = None
+        if self.regime_filter and bench_full is not None:
+            regime_ma_series = bench_full.rolling(self.regime_ma).mean()
 
         equity = []
         trades: List[Trade] = []
@@ -155,6 +165,11 @@ class Backtester:
                 if sig.action == Action.BUY and pos.shares == 0:
                     if i < cooldown_until.get(sym, 0):  # 冷卻期內，跳過買進
                         continue
+                    if regime_ma_series is not None:  # 大盤空頭，禁止做多
+                        mkt = bench_full.asof(date)
+                        mkt_ma = regime_ma_series.asof(date)
+                        if mkt == mkt and mkt_ma == mkt_ma and mkt < mkt_ma:
+                            continue
                     budget = per_lot_budget * sig.strength
                     if self.allow_odd_lot:
                         shares = int(budget // price)               # 零股：1 股為單位
