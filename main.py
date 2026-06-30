@@ -112,6 +112,7 @@ def cmd_backtest(args):
         allow_odd_lot=not args.whole_lot,
         cooldown_days=args.cooldown,
         regime_filter=args.regime,
+        compound=args.compound,
     )
     result = bt.run(strat, symbols, args.start, args.end)
 
@@ -407,6 +408,7 @@ def build_parser():
     bt.add_argument("--cooldown", type=int, default=5, help="賣出後幾個交易日內不重買 (防洗盤)，0=關閉")
     bt.add_argument("--params", default="", help="覆寫策略參數，如 'up_threshold=0.02,down_threshold=0.03'")
     bt.add_argument("--regime", action="store_true", help="大盤風向濾網：加權指數跌破年線時禁止做多")
+    bt.add_argument("--compound", action="store_true", help="複利：用當前權益下單(賺的錢滾入)；預設固定金額")
     bt.set_defaults(func=cmd_backtest)
 
     sc = sub.add_parser("scan", help="掃描產生交易訊號 (模擬/實單)")
