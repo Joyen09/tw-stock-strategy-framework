@@ -109,9 +109,11 @@ def main():
                 tag = "🟢買" if p.action == "BUY" else "🔴賣"
                 print(f"    {tag} {p.symbol} {p.shares} 股 @ {p.price:.1f}")
         else:
-            print("    （無動作，續抱）")
-        held = "、".join(f"{p.symbol}x{p.shares}" for p in positions) or "無"
-        print(f"    現金 {broker.cash():,.0f}　持倉 {len(positions)} 檔 [{held}]　總資產 {equity:,.0f}\n")
+            print("    (無動作，續抱)")
+        # 用半形空格、且把長字串拆行，避免終端機換行時數字黏在一起
+        print(f"    現金 {broker.cash():>8,.0f}   總資產 {equity:>8,.0f}   持倉 {len(positions)} 檔")
+        held = ", ".join(f"{p.symbol}x{p.shares}" for p in positions) or "無"
+        print(f"    持股 {held}\n")
 
     if prices:
         print(f"模擬結束：總資產 {broker.equity(prices):,.0f}（起始 {CASH:,}）")
