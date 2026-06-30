@@ -140,25 +140,28 @@ class LiveTrader:
         # 先執行賣出 (出場不設上限)，釋出資金與部位額度
         plans: List[TradePlan] = []
         for plan in sells:
-            self._execute(plan)
-            plans.append(plan)
+            if self._execute(plan):  # 只記錄真的成交的
+                plans.append(plan)
 
         # 買進：只挑訊號最強的，且不超過最大持倉檔數 (避免資金被撒太散)
         buy_cands.sort(key=lambda x: x[0], reverse=True)
         held = len([p for p in self.broker.positions() if p.shares > 0])
         slots = (self.max_positions - held) if self.max_positions else len(buy_cands)
         for _, plan in buy_cands[: max(0, slots)]:
-            self._execute(plan)
-            plans.append(plan)
+            if self._execute(plan):  # 資金不足會回 False，不誤報
+                plans.append(plan)
 
         self.last_notify_ok = self._notify(plans, end)
         return plans
 
-    def _execute(self, plan: TradePlan):
-        if not self.dry_run:
-            side = OrderSide.BUY if plan.action == "BUY" else OrderSide.SELL
-            self.broker.place_order(Order(plan.symbol, side, plan.shares, plan.price, plan.reason))
-            plan.sent = True
+    def _execute(self, plan: TradePlan) -> bool:
+        """執行下單；回傳是否真的成交 (dry-run 視為假設成立)。"""
+        if self.dry_run:
+            return True
+        side = OrderSide.BUY if plan.action == "BUY" else OrderSide.SELL
+        order = self.broker.place_order(Order(plan.symbol, side, plan.shares, plan.price, plan.reason))
+        plan.sent = bool(getattr(order, "filled", False))
+        return plan.sent
 
     def _notify(self, plans: List[TradePlan], end: str) -> bool:
         """有訊號就推 Telegram；無訊號不推，避免洗版。回傳是否成功送出。"""

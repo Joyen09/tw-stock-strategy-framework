@@ -31,6 +31,22 @@ _STOCKS = {
     "2603": dict(name="長榮", drift=0.0004, vol=0.030, start=150,
                  fund=dict(pe=8, pb=1.2, roe=15, eps=18, eps_growth=40, revenue_growth=25,
                            dividend_yield=5.0, debt_ratio=45, current_ratio=170, gross_margin=22)),
+    # 以下為演示用，基本面皆符合林區條件 (PEG<=1.2、EPS成長15~50%)，但漲跌不同 → 容易觸發換股。
+    "2308": dict(name="台達電", drift=0.0005, vol=0.022, start=300,
+                 fund=dict(pe=20, pb=4.0, roe=22, eps=15, eps_growth=25, revenue_growth=18,
+                           dividend_yield=2.5, debt_ratio=40, current_ratio=180, gross_margin=29)),
+    "2891": dict(name="中信金", drift=0.0002, vol=0.014, start=30,
+                 fund=dict(pe=11, pb=1.0, roe=12, eps=2.5, eps_growth=20, revenue_growth=15,
+                           dividend_yield=5.5, debt_ratio=55, current_ratio=120, gross_margin=40)),
+    "2882": dict(name="國泰金", drift=-0.0001, vol=0.016, start=55,
+                 fund=dict(pe=10, pb=1.1, roe=11, eps=5.0, eps_growth=18, revenue_growth=12,
+                           dividend_yield=5.0, debt_ratio=58, current_ratio=110, gross_margin=35)),
+    "3034": dict(name="聯詠", drift=0.0006, vol=0.026, start=400,
+                 fund=dict(pe=15, pb=3.0, roe=25, eps=35, eps_growth=35, revenue_growth=22,
+                           dividend_yield=4.0, debt_ratio=38, current_ratio=190, gross_margin=42)),
+    "1101": dict(name="台泥", drift=-0.0002, vol=0.018, start=35,
+                 fund=dict(pe=13, pb=1.1, roe=9, eps=2.0, eps_growth=16, revenue_growth=10,
+                           dividend_yield=4.5, debt_ratio=50, current_ratio=130, gross_margin=20)),
 }
 
 

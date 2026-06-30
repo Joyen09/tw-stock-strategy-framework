@@ -62,6 +62,7 @@ class ShioajiBroker(Broker):
         trade = self.api.place_order(contract, sj_order)
         order.order_id = str(getattr(trade.status, "id", "")) or None
         order.note += f" | 已送單 status={getattr(trade.status, 'status', '?')}"
+        order.filled = True  # 委託已送出 (實際成交與否需另查帳戶)；視為已下單以利回報
         return order
 
     def realtime_quote(self, symbol: str) -> Optional[float]:
