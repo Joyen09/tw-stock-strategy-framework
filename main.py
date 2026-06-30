@@ -260,16 +260,26 @@ def cmd_scan(args):
     else:
         broker = PaperBroker(cash=args.cash)
 
+    # 執行期設定 (Telegram /budget /maxpos /pause 動態覆寫)
+    from src.control import load_runtime
+    rc = load_runtime()
+    budget = rc["budget"] if rc.get("budget") else args.budget
+    max_pos = rc["max_positions"] if rc.get("max_positions") else args.max_positions
+    paused = bool(rc.get("paused"))
+
     trader = LiveTrader(
         provider, broker, strat,
-        position_budget=args.budget,
+        position_budget=budget,
         dry_run=not args.live,
         quote_fn=quote_fn,
         notifier=notifier,
         regime_filter=args.regime,
-        max_positions=args.max_positions,
+        max_positions=max_pos,
+        paused=paused,
     )
     plans = trader.scan(symbols, args.end)
+    if paused:
+        print("（⏸ 目前暫停買進中，只執行賣出）")
 
     mode = "實單" if args.live else "DRY-RUN (未送單)"
     rt = " +即時報價" if quote_fn else ""
@@ -335,6 +345,15 @@ def cmd_fundamentals(args):
             print(f"  {label:<16}: {val if val is not None else '—':<12} {mark}")
         if f.extra:
             print(f"  (備註: {f.extra})")
+
+
+def cmd_listen(args):
+    """持續監聽 Telegram 指令 (/budget /maxpos /pause /resume /status)，動態調整設定。"""
+    from src.control import poll_loop
+    try:
+        poll_loop()
+    except KeyboardInterrupt:
+        print("\n已停止監聽。")
 
 
 def cmd_notify_test(args):
@@ -485,6 +504,7 @@ def build_parser():
     fd.add_argument("--source", choices=["sample", "finmind"], default="finmind")
     fd.set_defaults(func=cmd_fundamentals)
 
+    sub.add_parser("listen", help="監聽 Telegram 指令動態調整設定 (/budget /pause...)").set_defaults(func=cmd_listen)
     sub.add_parser("notify-test", help="送一則 Telegram 測試訊息").set_defaults(func=cmd_notify_test)
     sub.add_parser("notify-chatid", help="查詢自己的 Telegram chat_id").set_defaults(func=cmd_notify_chatid)
 

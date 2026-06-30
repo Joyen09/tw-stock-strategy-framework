@@ -45,6 +45,7 @@ class LiveTrader:
         regime_filter: bool = False,
         regime_ma: int = 200,
         max_positions: int = 0,
+        paused: bool = False,
     ):
         self.provider = provider
         self.broker = broker
@@ -55,6 +56,8 @@ class LiveTrader:
         self.allow_odd_lot = allow_odd_lot
         # 最多同時持有幾檔 (只買訊號最強的前 N 檔)；0=不限制。
         self.max_positions = max_positions
+        # 暫停：只出場、不買進 (由 Telegram /pause 控制)。
+        self.paused = paused
         # 大盤風向濾網：與回測一致，加權指數跌破年線時禁止做多。
         self.regime_filter = regime_filter
         self.regime_ma = regime_ma
@@ -146,6 +149,8 @@ class LiveTrader:
         # 買進：只挑訊號最強的，且不超過最大持倉檔數 (避免資金被撒太散)
         buy_cands.sort(key=lambda x: x[0], reverse=True)
         held = len([p for p in self.broker.positions() if p.shares > 0])
+        if self.paused:  # 暫停中：只出場、不買進
+            buy_cands = []
         slots = (self.max_positions - held) if self.max_positions else len(buy_cands)
         for _, plan in buy_cands[: max(0, slots)]:
             if self._execute(plan):  # 資金不足會回 False，不誤報
