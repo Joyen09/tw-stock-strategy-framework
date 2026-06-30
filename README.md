@@ -146,7 +146,7 @@ for p in trader.scan(["2330", "2454"], end="2025-12-31"):
 ## 專案結構
 
 ```
-stock/
+tw-stock-strategy-framework/
 ├── main.py                 # 命令列入口
 ├── config.example.yaml     # 設定範本（複製成 config.yaml）
 ├── requirements.txt
