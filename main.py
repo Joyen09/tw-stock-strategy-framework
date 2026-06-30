@@ -154,6 +154,24 @@ def cmd_compare(args):
     print("\n夏普值越高代表『風險調整後報酬』越好（同樣賺，波動越小越優）。")
 
 
+def _rank_by_sharpe(provider, args, symbols, start, end):
+    """對每檔股票各自回測 args.strategy，回傳依夏普排序的 (sym,報酬,年化,回撤,夏普,交易數)。"""
+    rows = []
+    for sym in symbols:
+        try:
+            strat = strategies.build(args.strategy)
+            bt = Backtester(provider, initial_cash=args.cash, fee_discount=args.fee_discount,
+                            cooldown_days=args.cooldown, regime_filter=args.regime)
+            r = bt.run(strat, [sym], start, end)
+            if len(r.trades) == 0:
+                continue  # 沒交易代表這檔不符合此策略，略過
+            rows.append((sym, r.total_return, r.cagr, r.max_drawdown, r.sharpe, len(r.trades)))
+        except Exception as e:
+            print(f"  {sym} 失敗: {e}")
+    rows.sort(key=lambda x: x[4], reverse=True)
+    return rows
+
+
 def cmd_pick(args):
     """科學選股：對一籃子股票各自回測同一策略，按夏普排名，挑出最速配的前 N 檔。"""
     from src.data.cache import CachingProvider
@@ -162,20 +180,7 @@ def cmd_pick(args):
     symbols = _symbols(args, provider)
 
     print(f"用『{args.strategy}』策略逐檔回測 {len(symbols)} 檔（{args.start}~{args.end}），請稍候...\n")
-    rows = []
-    for sym in symbols:
-        try:
-            strat = strategies.build(args.strategy)
-            bt = Backtester(provider, initial_cash=args.cash, fee_discount=args.fee_discount,
-                            cooldown_days=args.cooldown, regime_filter=args.regime)
-            r = bt.run(strat, [sym], args.start, args.end)
-            if len(r.trades) == 0:
-                continue  # 沒交易代表這檔不符合此策略，略過
-            rows.append((sym, r.total_return, r.cagr, r.max_drawdown, r.sharpe, len(r.trades)))
-        except Exception as e:
-            print(f"  {sym} 失敗: {e}")
-
-    rows.sort(key=lambda x: x[4], reverse=True)
+    rows = _rank_by_sharpe(provider, args, symbols, args.start, args.end)
     from src.data.universe import NAMES
     print(f"{'排名':<4}{'股票':<14}{'總報酬':>9}{'年化':>8}{'最大回撤':>10}{'夏普':>7}{'交易數':>7}")
     print("-" * 62)
@@ -190,6 +195,49 @@ def cmd_pick(args):
         print(f"   直接拿去掃描： python main.py scan --strategy {args.strategy} --source finmind "
               f"--regime --symbols {','.join(top)} --notify")
     print("\n⚠️ 這是『歷史』最速配，不保證未來；空頭時靠 --regime 保護。")
+
+
+def cmd_walkforward(args):
+    """誠實驗證：在『訓練期』選股，到『測試期』(沒看過的未來) 驗證，避免背答案。"""
+    from src.data.cache import CachingProvider
+    from src.data.universe import NAMES
+
+    provider = CachingProvider(_provider(args))
+    symbols = _symbols(args, provider)
+
+    # 1) 訓練期：逐檔回測、挑夏普最高的前 N 檔
+    print(f"【訓練期 {args.train_start}~{args.train_end}】用 {args.strategy} 從 {len(symbols)} 檔挑前 {args.top}...\n")
+    ranked = _rank_by_sharpe(provider, args, symbols, args.train_start, args.train_end)
+    chosen = [r[0] for r in ranked[: args.top]]
+    if not chosen:
+        print("訓練期選不出股票（可能沒交易）。")
+        return
+    print("訓練期選出：" + "、".join(f"{s}{NAMES.get(s,'')}" for s in chosen))
+
+    # 2) 同一組在「訓練期」與「測試期」各跑一次，比較落差
+    def _run(start, end):
+        strat = strategies.build(args.strategy)
+        bt = Backtester(provider, initial_cash=args.cash, position_pct=args.position_pct,
+                        fee_discount=args.fee_discount, cooldown_days=args.cooldown,
+                        regime_filter=args.regime)
+        return bt.run(strat, chosen, start, end)
+
+    in_s = _run(args.train_start, args.train_end)
+    out_s = _run(args.test_start, args.test_end)
+
+    print(f"\n{'期間':<10}{'總報酬':>10}{'年化':>9}{'最大回撤':>10}{'夏普':>8}{'交易數':>7}")
+    print("-" * 56)
+    print(f"{'訓練(背答案)':<12}{in_s.total_return:>9.2%}{in_s.cagr:>9.2%}{in_s.max_drawdown:>10.2%}{in_s.sharpe:>8.2f}{len(in_s.trades):>7}")
+    print(f"{'測試(沒看過)':<12}{out_s.total_return:>9.2%}{out_s.cagr:>9.2%}{out_s.max_drawdown:>10.2%}{out_s.sharpe:>8.2f}{len(out_s.trades):>7}")
+
+    print("\n判讀：")
+    if out_s.sharpe >= 0.5 and out_s.total_return > 0:
+        print("  ✅ 測試期(沒看過的未來)仍正報酬、夏普>=0.5 → 這套比較可信，不只是背答案。")
+    elif out_s.total_return > 0:
+        print("  🟡 測試期還有賺但變弱 → 有點實力，但別期待訓練期那麼好。")
+    else:
+        print("  🔴 測試期由盈轉虧 → 訓練期的好成績多半是『選到剛好走運的股票』，別輕信。")
+    print("  (測試期通常會比訓練期差，落差越小越穩健。)")
 
 
 def cmd_scan(args):
@@ -388,6 +436,23 @@ def build_parser():
     pk.add_argument("--regime", action="store_true", help="大盤風向濾網")
     pk.add_argument("--source", choices=["sample", "finmind"], default="finmind")
     pk.set_defaults(func=cmd_pick)
+
+    wf = sub.add_parser("walkforward", help="誠實驗證：訓練期選股→測試期(沒看過)驗證，防背答案")
+    wf.add_argument("--strategy", required=True)
+    wf.add_argument("--symbols", default="", help="逗號分隔股票；留空用 --universe")
+    wf.add_argument("--universe", default="tw50", help="預設股池: tw50 或 top15")
+    wf.add_argument("--top", type=int, default=5)
+    wf.add_argument("--train-start", default="2023-01-01")
+    wf.add_argument("--train-end", default="2024-06-30")
+    wf.add_argument("--test-start", default="2024-07-01")
+    wf.add_argument("--test-end", default="2025-12-31")
+    wf.add_argument("--cash", type=float, default=1_000_000)
+    wf.add_argument("--position-pct", type=float, default=0.2)
+    wf.add_argument("--fee-discount", type=float, default=0.28)
+    wf.add_argument("--cooldown", type=int, default=5)
+    wf.add_argument("--regime", action="store_true", help="大盤風向濾網")
+    wf.add_argument("--source", choices=["sample", "finmind"], default="finmind")
+    wf.set_defaults(func=cmd_walkforward)
 
     cp = sub.add_parser("compare", help="批次比較：所有策略跑同一批股票，按夏普排名")
     cp.add_argument("--symbols", default="", help="逗號分隔股票；留空用樣本股")
