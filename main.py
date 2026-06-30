@@ -112,6 +112,7 @@ def cmd_backtest(args):
         allow_odd_lot=not args.whole_lot,
         cooldown_days=args.cooldown,
         regime_filter=args.regime,
+        compound=args.compound,
     )
     result = bt.run(strat, symbols, args.start, args.end)
 
@@ -259,15 +260,26 @@ def cmd_scan(args):
     else:
         broker = PaperBroker(cash=args.cash)
 
+    # 執行期設定 (Telegram /budget /maxpos /pause 動態覆寫)
+    from src.control import load_runtime
+    rc = load_runtime()
+    budget = rc["budget"] if rc.get("budget") else args.budget
+    max_pos = rc["max_positions"] if rc.get("max_positions") else args.max_positions
+    paused = bool(rc.get("paused"))
+
     trader = LiveTrader(
         provider, broker, strat,
-        position_budget=args.budget,
+        position_budget=budget,
         dry_run=not args.live,
         quote_fn=quote_fn,
         notifier=notifier,
         regime_filter=args.regime,
+        max_positions=max_pos,
+        paused=paused,
     )
     plans = trader.scan(symbols, args.end)
+    if paused:
+        print("（⏸ 目前暫停買進中，只執行賣出）")
 
     mode = "實單" if args.live else "DRY-RUN (未送單)"
     rt = " +即時報價" if quote_fn else ""
@@ -333,6 +345,15 @@ def cmd_fundamentals(args):
             print(f"  {label:<16}: {val if val is not None else '—':<12} {mark}")
         if f.extra:
             print(f"  (備註: {f.extra})")
+
+
+def cmd_listen(args):
+    """持續監聽 Telegram 指令 (/budget /maxpos /pause /resume /status /holdings /sell)。"""
+    from src.control import poll_loop
+    try:
+        poll_loop(simulation=not args.real_account)
+    except KeyboardInterrupt:
+        print("\n已停止監聽。")
 
 
 def cmd_notify_test(args):
@@ -407,6 +428,7 @@ def build_parser():
     bt.add_argument("--cooldown", type=int, default=5, help="賣出後幾個交易日內不重買 (防洗盤)，0=關閉")
     bt.add_argument("--params", default="", help="覆寫策略參數，如 'up_threshold=0.02,down_threshold=0.03'")
     bt.add_argument("--regime", action="store_true", help="大盤風向濾網：加權指數跌破年線時禁止做多")
+    bt.add_argument("--compound", action="store_true", help="複利：用當前權益下單(賺的錢滾入)；預設固定金額")
     bt.set_defaults(func=cmd_backtest)
 
     sc = sub.add_parser("scan", help="掃描產生交易訊號 (模擬/實單)")
@@ -421,6 +443,8 @@ def build_parser():
     sc.add_argument("--real-account", action="store_true", help="Shioaji 用實單帳戶 (預設模擬盤)")
     sc.add_argument("--regime", action="store_true", help="大盤風向濾網：跌破年線時禁止做多 (建議開啟)")
     sc.add_argument("--notify", action="store_true", help="把交易訊號推到 Telegram")
+    sc.add_argument("--max-positions", type=int, default=0, help="最多同時持有幾檔(只買訊號最強的前N檔)；0=不限")
+    sc.add_argument("--universe", default="top15", help="未指定 --symbols 時的候選池: top15 或 tw50")
     sc.set_defaults(func=cmd_scan)
 
     pk = sub.add_parser("pick", help="科學選股：一個策略逐檔回測，挑夏普最高的前 N 檔")
@@ -480,6 +504,9 @@ def build_parser():
     fd.add_argument("--source", choices=["sample", "finmind"], default="finmind")
     fd.set_defaults(func=cmd_fundamentals)
 
+    ls = sub.add_parser("listen", help="監聽 Telegram 指令 (/budget /pause /holdings /sell...)")
+    ls.add_argument("--real-account", action="store_true", help="/holdings /sell 用實單帳戶 (預設模擬盤)")
+    ls.set_defaults(func=cmd_listen)
     sub.add_parser("notify-test", help="送一則 Telegram 測試訊息").set_defaults(func=cmd_notify_test)
     sub.add_parser("notify-chatid", help="查詢自己的 Telegram chat_id").set_defaults(func=cmd_notify_chatid)
 

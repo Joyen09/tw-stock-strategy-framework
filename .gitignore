@@ -1,6 +1,7 @@
 # 機敏設定 / 金鑰 — 絕對不可進版控
 config.yaml
 .env
+runtime.json
 *.pfx
 *.cer
 ca/

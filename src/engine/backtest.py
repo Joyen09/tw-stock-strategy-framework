@@ -97,12 +97,16 @@ class Backtester:
         cooldown_days: int = 5,
         regime_filter: bool = False,
         regime_ma: int = 200,
+        compound: bool = False,
     ):
         self.provider = provider
         self.initial_cash = initial_cash
         self.position_pct = position_pct
         self.fee_discount = fee_discount
         self.warmup = warmup
+        # 複利：每筆下單金額用「當前帳戶權益 × 比例」(賺的錢滾入)；
+        # 關閉則用「初始資金 × 比例」(固定金額，不複利)。
+        self.compound = compound
         # 防洗盤：賣出後 N 個交易日內不重買同一檔，避免在均線上下來回被巴手續費。
         self.cooldown_days = cooldown_days
         # 允許零股 (1 股為單位)；台股盤中零股可交易，貴的股票小資金也買得到。
@@ -129,7 +133,6 @@ class Backtester:
 
         # 統一交易日曆 (所有股票日期聯集)。
         all_dates = sorted(set().union(*[set(df.index) for df in data.values() if not df.empty]))
-        per_lot_budget = self.initial_cash * self.position_pct
 
         # 預算大盤年線，供風向濾網用。
         regime_ma_series = None
@@ -175,7 +178,9 @@ class Backtester:
                         mkt_ma = regime_ma_series.asof(date)
                         if mkt == mkt and mkt_ma == mkt_ma and mkt < mkt_ma:
                             continue
-                    budget = per_lot_budget * sig.strength
+                    # 複利用當前權益、否則用初始資金當基準
+                    base_cap = self._equity(broker, data, date) if self.compound else self.initial_cash
+                    budget = base_cap * self.position_pct * sig.strength
                     if self.allow_odd_lot:
                         shares = int(budget // price)               # 零股：1 股為單位
                     else:

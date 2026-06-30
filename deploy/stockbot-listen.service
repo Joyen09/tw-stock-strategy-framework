@@ -1,0 +1,24 @@
+# systemd 服務：常駐監聽 Telegram 指令，動態調整 budget / max_positions / pause。
+# 安裝：
+#   sed -i "s/YOUR_USER/$(whoami)/g" deploy/stockbot-listen.service
+#   sudo cp deploy/stockbot-listen.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now stockbot-listen.service
+#   journalctl -u stockbot-listen.service -f      # 看即時 log
+[Unit]
+Description=Taiwan stock bot - Telegram command listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/stock
+EnvironmentFile=-/home/YOUR_USER/stock/.env
+ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py listen
+Restart=always
+RestartSec=10
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target
