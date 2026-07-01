@@ -19,6 +19,36 @@ from typing import List, Optional
 from ..models import Position
 from .base import Broker, Order, OrderSide
 
+# 盤中零股 (IntradayOdd) 單一委託上限：1~999 股。>=1000 股必須走整股 (Common)。
+ODD_LOT_MAX = 999
+LOT = 1000
+
+
+def plan_order_lots(shares: int) -> List[tuple]:
+    """把總股數拆成 Shioaji 可接受的委託單段，回傳 [(lot_kind, quantity), ...]。
+
+    - lot_kind == "Common"：整股，quantity 以「張」計 (1 張 = 1000 股)。
+    - lot_kind == "IntradayOdd"：盤中零股，quantity 以「股」計 (1~999)。
+
+    例：
+      2      -> [("IntradayOdd", 2)]          # 純零股
+      1000   -> [("Common", 1)]               # 純整張
+      1666   -> [("Common", 1), ("IntradayOdd", 666)]   # 拆成 1 張 + 666 零股
+
+    ⚠️ 修正前的舊邏輯會把 1666 股當成單一 IntradayOdd(1666) 送出，但盤中零股單一委託
+    上限 999 股，券商會拒單。低價股 + 較大 budget 時 (股數 > 999 且非整張倍數) 就會踩到。
+    """
+    if shares <= 0:
+        return []
+    segments: List[tuple] = []
+    lots = shares // LOT
+    odd = shares % LOT
+    if lots > 0:
+        segments.append(("Common", lots))
+    if odd > 0:
+        segments.append(("IntradayOdd", odd))
+    return segments
+
 
 class ShioajiBroker(Broker):
     def __init__(self, simulation: bool = True):
@@ -53,32 +83,47 @@ class ShioajiBroker(Broker):
         sj = self.sj
         action = sj.constant.Action.Buy if order.side == OrderSide.BUY else sj.constant.Action.Sell
 
-        # 依股數決定整股 or 盤中零股，避免把零股誤放大成整張。
-        if order.shares % 1000 == 0 and order.shares >= 1000:
-            # 整股：以「張」為單位
-            order_lot = sj.constant.StockOrderLot.Common
-            quantity = order.shares // 1000
-            price_type = sj.constant.StockPriceType.MKT if order.price is None else sj.constant.StockPriceType.LMT
-            price = order.price or 0
-        else:
-            # 盤中零股：以「股」為單位，且只能限價 (需帶價格)
-            order_lot = sj.constant.StockOrderLot.IntradayOdd
-            quantity = order.shares
-            price_type = sj.constant.StockPriceType.LMT
-            price = order.price or self.realtime_quote(order.symbol) or 0
+        # 依股數拆成整股 (Common, 以張計) + 零股 (IntradayOdd, 1~999 股) 兩段，避免把
+        # 零股誤放大成整張、也避免 >999 股塞進單一零股委託被拒單。
+        segments = plan_order_lots(order.shares)
+        if not segments:
+            order.note += " | 股數<=0，未送單"
+            return order
 
-        sj_order = self.api.Order(
-            price=price,
-            quantity=quantity,
-            action=action,
-            price_type=price_type,
-            order_type=sj.constant.OrderType.ROD,
-            order_lot=order_lot,
-            account=self.api.stock_account,
-        )
-        trade = self.api.place_order(contract, sj_order)
-        order.order_id = str(getattr(trade.status, "id", "")) or None
-        order.note += f" | 已送單 status={getattr(trade.status, 'status', '?')}"
+        odd_price = None  # 零股需限價；懶取即時價，避免整股 MKT 時多打一次報價 API
+        ids: List[str] = []
+        statuses: List[str] = []
+        for lot_kind, quantity in segments:
+            if lot_kind == "Common":
+                order_lot = sj.constant.StockOrderLot.Common
+                price_type = sj.constant.StockPriceType.MKT if order.price is None else sj.constant.StockPriceType.LMT
+                price = order.price or 0
+            else:
+                # 盤中零股：只能限價 (需帶價格)
+                order_lot = sj.constant.StockOrderLot.IntradayOdd
+                price_type = sj.constant.StockPriceType.LMT
+                if order.price is None and odd_price is None:
+                    odd_price = self.realtime_quote(order.symbol) or 0
+                price = order.price if order.price is not None else odd_price
+
+            sj_order = self.api.Order(
+                price=price,
+                quantity=quantity,
+                action=action,
+                price_type=price_type,
+                order_type=sj.constant.OrderType.ROD,
+                order_lot=order_lot,
+                account=self.api.stock_account,
+            )
+            trade = self.api.place_order(contract, sj_order)
+            oid = str(getattr(trade.status, "id", ""))
+            if oid:
+                ids.append(oid)
+            statuses.append(str(getattr(trade.status, "status", "?")))
+
+        order.order_id = ",".join(ids) or None
+        seg_desc = "+".join(f"{k}×{q}" for k, q in segments)
+        order.note += f" | 已送單[{seg_desc}] status={'/'.join(statuses)}"
         order.filled = True  # 委託已送出 (實際成交與否需另查帳戶)；視為已下單以利回報
         return order
 
