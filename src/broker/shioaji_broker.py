@@ -36,14 +36,17 @@ class ShioajiBroker(Broker):
         api_key = os.environ["SHIOAJI_API_KEY"]
         secret_key = os.environ["SHIOAJI_SECRET_KEY"]
         self.accounts = self.api.login(api_key=api_key, secret_key=secret_key)
-        # 實單需啟用憑證；模擬盤可略過。
+        # 憑證：登入/報價不需要，但「下單」即使模擬盤也需要啟用憑證 (否則 place_order 會回
+        # "Please sign ... first")。所以只要有設定憑證路徑就啟用。
         ca_path = os.getenv("SHIOAJI_CA_PATH")
-        if not self.simulation and ca_path:
+        if ca_path:
             self.api.activate_ca(
                 ca_path=ca_path,
-                ca_passwd=os.environ["SHIOAJI_CA_PASSWD"],
-                person_id=os.environ["SHIOAJI_PERSON_ID"],
+                ca_passwd=os.getenv("SHIOAJI_CA_PASSWD", ""),
+                person_id=os.getenv("SHIOAJI_PERSON_ID", ""),
             )
+        elif not self.simulation:
+            print("[Shioaji] 警告：未設定 SHIOAJI_CA_PATH，實單無法下單")
 
     def place_order(self, order: Order) -> Order:
         contract = self.api.Contracts.Stocks[order.symbol]
