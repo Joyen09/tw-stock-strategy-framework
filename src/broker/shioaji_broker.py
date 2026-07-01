@@ -52,14 +52,28 @@ class ShioajiBroker(Broker):
         contract = self.api.Contracts.Stocks[order.symbol]
         sj = self.sj
         action = sj.constant.Action.Buy if order.side == OrderSide.BUY else sj.constant.Action.Sell
-        # 台股整股下單以「張」為單位，這裡把股數換成張 (1 張 = 1000 股)。
-        quantity = max(1, order.shares // 1000)
+
+        # 依股數決定整股 or 盤中零股，避免把零股誤放大成整張。
+        if order.shares % 1000 == 0 and order.shares >= 1000:
+            # 整股：以「張」為單位
+            order_lot = sj.constant.StockOrderLot.Common
+            quantity = order.shares // 1000
+            price_type = sj.constant.StockPriceType.MKT if order.price is None else sj.constant.StockPriceType.LMT
+            price = order.price or 0
+        else:
+            # 盤中零股：以「股」為單位，且只能限價 (需帶價格)
+            order_lot = sj.constant.StockOrderLot.IntradayOdd
+            quantity = order.shares
+            price_type = sj.constant.StockPriceType.LMT
+            price = order.price or self.realtime_quote(order.symbol) or 0
+
         sj_order = self.api.Order(
-            price=order.price or 0,
+            price=price,
             quantity=quantity,
             action=action,
-            price_type=sj.constant.StockPriceType.MKT if order.price is None else sj.constant.StockPriceType.LMT,
+            price_type=price_type,
             order_type=sj.constant.OrderType.ROD,
+            order_lot=order_lot,
             account=self.api.stock_account,
         )
         trade = self.api.place_order(contract, sj_order)
@@ -81,8 +95,15 @@ class ShioajiBroker(Broker):
 
     def positions(self) -> List[Position]:
         result = []
-        for p in self.api.list_positions(self.api.stock_account):
-            result.append(Position(symbol=p.code, shares=int(p.quantity) * 1000, avg_price=float(p.price)))
+        try:
+            # 以「股」為單位查詢，零股/整股都能正確表示 (不再一律 ×1000)
+            poss = self.api.list_positions(self.api.stock_account, unit=self.sj.constant.Unit.Share)
+            for p in poss:
+                result.append(Position(symbol=p.code, shares=int(p.quantity), avg_price=float(p.price)))
+        except Exception:
+            # 舊版/不支援 unit 參數時退回：quantity 以「張」計，換算成股
+            for p in self.api.list_positions(self.api.stock_account):
+                result.append(Position(symbol=p.code, shares=int(p.quantity) * 1000, avg_price=float(p.price)))
         return result
 
     def cash(self) -> float:
