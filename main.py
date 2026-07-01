@@ -19,6 +19,11 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import date
+
+
+def _today() -> str:
+    return date.today().strftime("%Y-%m-%d")
 
 from src.data.sample import SampleDataProvider
 from src.engine.backtest import Backtester
@@ -242,6 +247,7 @@ def cmd_walkforward(args):
 
 
 def cmd_scan(args):
+    end = args.end or _today()  # 未指定則用今天 (實盤掃描要看最新)
     provider = _provider(args)
     symbols = _symbols(args, provider)
     strat = strategies.build(args.strategy)
@@ -277,13 +283,13 @@ def cmd_scan(args):
         max_positions=max_pos,
         paused=paused,
     )
-    plans = trader.scan(symbols, args.end)
+    plans = trader.scan(symbols, end)
     if paused:
         print("（⏸ 目前暫停買進中，只執行賣出）")
 
     mode = "實單" if args.live else "DRY-RUN (未送單)"
     rt = " +即時報價" if quote_fn else ""
-    print(f"\n=== 掃描結果 [{mode}{rt}]：{args.strategy} @ {args.end} ===")
+    print(f"\n=== 掃描結果 [{mode}{rt}]：{args.strategy} @ {end} ===")
     if not plans:
         print("本輪無交易訊號。")
     for p in plans:
@@ -311,7 +317,7 @@ def cmd_screen(args):
     strats = [strategies.build(n) for n in names]
 
     print(f"掃描 {len(symbols)} 檔 × {len(strats)} 策略，請稍候...")
-    res = Screener(provider, strats).run(symbols, args.end)
+    res = Screener(provider, strats).run(symbols, args.end or _today())
     report = format_report(res)
     print("\n" + report)
 
@@ -434,7 +440,7 @@ def build_parser():
     sc = sub.add_parser("scan", help="掃描產生交易訊號 (模擬/實單)")
     sc.add_argument("--strategy", required=True)
     sc.add_argument("--symbols", default="")
-    sc.add_argument("--end", default="2025-12-31", help="掃描的基準日期")
+    sc.add_argument("--end", default="", help="掃描的基準日期 (預設今天)")
     sc.add_argument("--cash", type=float, default=1_000_000)
     sc.add_argument("--budget", type=float, default=200_000, help="單檔最大投入金額")
     sc.add_argument("--source", choices=["sample", "finmind"], default="sample")
@@ -494,7 +500,7 @@ def build_parser():
     sg.add_argument("--symbols", default="", help="逗號分隔股票；留空用 --universe")
     sg.add_argument("--universe", default="top15", help="預設股池: top15 (預設) 或 tw50")
     sg.add_argument("--strategy", default="", help="逗號分隔策略；留空=全部")
-    sg.add_argument("--end", default="2025-12-31", help="掃描基準日期")
+    sg.add_argument("--end", default="", help="掃描基準日期 (預設今天)")
     sg.add_argument("--source", choices=["sample", "finmind"], default="finmind")
     sg.add_argument("--notify", action="store_true", help="把結果推到 Telegram")
     sg.set_defaults(func=cmd_screen)
