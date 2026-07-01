@@ -8,9 +8,11 @@
 
 ## 1. 這是什麼
 
+
 台股名人策略「回測 → 模擬盤 → 實單」自動交易框架。使用者是**軟體工程師**（自架 GCP VM、
 熟 git/CLI/Linux），但對「交易 / 量化」領域較新手。目標：把有紀律、扛得住空頭、不被情緒
 綁架的交易流程，變成手機上的 Telegram 通知/遙控。
+
 
 - **GitHub**：`https://github.com/Joyen09/tw-stock-strategy-framework`（原名 `stock`，已改名）
 - **預設分支**：`main`
@@ -49,7 +51,7 @@ SHIOAJI_SECRET_KEY=...
 SHIOAJI_CA_PATH=/home/linjoyen/stock/Sinopac.pfx
 SHIOAJI_CA_PASSWD=...
 SHIOAJI_PERSON_ID=<你的身分證字號>   # 實際值只放 VM 的 .env，勿寫進 repo
-```
+
 
 **`~/stock/runtime.json`**（Telegram 動態設定，gitignore 忽略）：`budget` / `max_positions` / `paused`。
 ⚠️ **這個會覆蓋指令上的 `--budget`**。之前使用者 Telegram 傳過 `/budget 60000` 導致下單金額爆大，
@@ -125,6 +127,7 @@ deploy/               # setup_vm.sh + systemd service/timer + README_DEPLOY.md
 ```
 
 ## 8. 給下一個 session 的提醒
+
 
 - 使用者是**軟體工程師**：技術操作（git/CLI/VM/systemd）可直接給指令、講細節；但**交易/量化觀念要白話**，並誠實說明風險。
 - 一路的核心原則：**不盲信「聽起來很厲害」的東西，一切用數據驗證**（回測含成本、walkforward 防背答案、空頭壓測、模擬盤先跑）。
