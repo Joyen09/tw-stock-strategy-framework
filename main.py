@@ -135,9 +135,9 @@ def cmd_backtest(args):
 
 def cmd_compare(args):
     """一次回測多個策略，按夏普值排名輸出比較表。"""
-    from src.data.cache import CachingProvider
+    from src.data.cache import DiskCachingProvider
 
-    provider = CachingProvider(_provider(args))
+    provider = DiskCachingProvider(_provider(args))
     symbols = _symbols(args, provider)
     names = args.strategy.split(",") if args.strategy else list(strategies.REGISTRY)
 
@@ -182,9 +182,9 @@ def _rank_by_sharpe(provider, args, symbols, start, end):
 
 def cmd_pick(args):
     """科學選股：對一籃子股票各自回測同一策略，按夏普排名，挑出最速配的前 N 檔。"""
-    from src.data.cache import CachingProvider
+    from src.data.cache import DiskCachingProvider
 
-    provider = CachingProvider(_provider(args))
+    provider = DiskCachingProvider(_provider(args))
     symbols = _symbols(args, provider)
 
     print(f"用『{args.strategy}』策略逐檔回測 {len(symbols)} 檔（{args.start}~{args.end}），請稍候...\n")
@@ -207,10 +207,10 @@ def cmd_pick(args):
 
 def cmd_walkforward(args):
     """誠實驗證：在『訓練期』選股，到『測試期』(沒看過的未來) 驗證，避免背答案。"""
-    from src.data.cache import CachingProvider
+    from src.data.cache import DiskCachingProvider
     from src.data.universe import NAMES
 
-    provider = CachingProvider(_provider(args))
+    provider = DiskCachingProvider(_provider(args))
     symbols = _symbols(args, provider)
 
     # 1) 訓練期：逐檔回測、挑夏普最高的前 N 檔
