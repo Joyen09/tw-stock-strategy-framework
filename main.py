@@ -404,7 +404,24 @@ def cmd_fundamentals(args):
 def cmd_listen(args):
     """持續監聽 Telegram 指令 (/budget /maxpos /pause /resume /status /holdings /sell)。"""
     from src.control import poll_loop
-    paper_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), args.paper_file)
+
+    # --paper-file 支援多帳戶：逗號分隔、可帶標籤，如
+    #   "lynch=paper_account.json,livermore=paper_livermore.json"
+    # /holdings 會合併顯示所有帳戶 + 總資產；/sell 自動路由到持有的帳戶。
+    root = os.path.dirname(os.path.abspath(__file__))
+    specs = []
+    for item in args.paper_file.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "=" in item:
+            label, fname = item.split("=", 1)
+        else:
+            label = os.path.splitext(os.path.basename(item))[0].removeprefix("paper_")
+            fname = item
+        specs.append((label.strip(), os.path.join(root, fname.strip())))
+    paper_path = specs if len(specs) > 1 else (specs[0][1] if specs else None)
+
     try:
         poll_loop(
             simulation=not args.real_account,
@@ -575,8 +592,9 @@ def build_parser():
     ls.add_argument("--real-account", action="store_true", help="/holdings /sell 用實單帳戶 (預設模擬盤)")
     ls.add_argument("--paper", action="store_true",
                     help="/holdings /sell 對本地持久化模擬盤帳戶 (需與 scan --paper 搭配)")
-    ls.add_argument("--paper-file", default="paper_account.json",
-                    help="本地模擬盤帳戶檔名 (需與 scan --paper-file 一致)")
+    ls.add_argument("--paper-file", default="lynch=paper_account.json,livermore=paper_livermore.json",
+                    help="模擬盤帳戶，逗號分隔可多個、可帶標籤 (標籤=檔名)。"
+                         "/holdings 合併顯示所有帳戶，/sell 自動路由")
     ls.set_defaults(func=cmd_listen)
     sub.add_parser("notify-test", help="送一則 Telegram 測試訊息").set_defaults(func=cmd_notify_test)
     sub.add_parser("notify-chatid", help="查詢自己的 Telegram chat_id").set_defaults(func=cmd_notify_chatid)

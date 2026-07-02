@@ -1,0 +1,12 @@
+# systemd 計時器：livermore 衛星策略，每交易日收盤後 14:20 跑一次。
+# 跟 lynch (14:00) 錯開 20 分鐘：避免同時打 FinMind、也讓 Telegram 通知不混在一起。
+# 安裝見 stockbot-livermore.service 開頭註解。
+[Unit]
+Description=Run livermore satellite scan once per trading day after close
+
+[Timer]
+OnCalendar=Mon-Fri 14:20
+Persistent=false
+
+[Install]
+WantedBy=timers.target

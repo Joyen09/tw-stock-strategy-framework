@@ -103,6 +103,11 @@ def handle_broker_command(text: str, broker) -> str:
     # 本地持久化模擬盤：重讀磁碟，讓 /holdings /sell 反映排程 scan 這段時間寫入的最新狀態。
     if hasattr(broker, "reload"):
         broker.reload()
+
+    # 多帳戶模擬盤 (雙策略各自記帳)：合併顯示、賣出自動路由到持有的帳戶。
+    if hasattr(broker, "brokers"):
+        return _handle_multi_paper(cmd, arg, broker)
+
     # PaperBroker 系需帶價格才能撮合 (賣出用持倉均價成交)；Shioaji 用 None=市價。
     is_paper = hasattr(broker, "account")
 
@@ -138,9 +143,45 @@ def handle_broker_command(text: str, broker) -> str:
     return ""
 
 
-def _try_broker(simulation: bool = True, paper: bool = False, paper_path: Optional[str] = None):
+def _handle_multi_paper(cmd: str, arg, broker) -> str:
+    """多帳戶模擬盤的 /holdings /sell：合起來一則訊息看總帳。"""
+    if cmd in ("holdings", "positions"):
+        sections = broker.holdings_by_account()
+        any_pos = any(ps for _, ps, _, _ in sections)
+        lines = ["📦 目前持倉（各策略帳戶合計）：" if any_pos else "📭 目前無持倉"]
+        for label, ps, cash, exists in sections:
+            if not exists and not ps:
+                continue  # 還沒開始跑的帳戶不顯示，避免誤導
+            lines.append(f"【{label}】")
+            for p in ps:
+                lines.append(f"　{p.symbol} {p.shares} 股 @ {p.avg_price:.1f}"
+                             f"（{p.shares * p.avg_price:,.0f} 元）")
+            if not ps:
+                lines.append("　(無持倉)")
+            lines.append(f"　現金 {cash:,.0f}")
+        lines.append(f"💰 總資產（成本計）：{broker.total_equity():,.0f}")
+        return "\n".join(lines)
+
+    if cmd == "sell":
+        if not arg:
+            return "用法：/sell 2330（賣某檔，自動找持有的帳戶）或 /sell all（全部帳戶出清）"
+        done = broker.sell(arg)
+        if not done:
+            return f"找不到 {arg} 的持倉"
+        return "🔴 已送出賣單：\n　" + "\n　".join(
+            f"[{label}] {sym} {shares} 股" for label, sym, shares in done)
+
+    return ""
+
+
+def _try_broker(simulation: bool = True, paper: bool = False, paper_path=None):
     if paper:
-        # 本地持久化模擬盤：/holdings /sell 對這個帳戶 (與 scan --paper 同一個 JSON 檔)
+        # 本地持久化模擬盤。paper_path 可以是：
+        #   單一路徑字串（單帳戶，維持舊行為）
+        #   [(標籤, 路徑), ...] 多帳戶 → 用 MultiPaperBroker 合併檢視/賣出
+        if isinstance(paper_path, (list, tuple)):
+            from src.broker.multi_paper import MultiPaperBroker
+            return MultiPaperBroker(list(paper_path))
         from src.broker.persistent_paper import PersistentPaperBroker
         return PersistentPaperBroker(path=paper_path)
     try:
@@ -164,7 +205,8 @@ def _get_updates(token: str, offset: Optional[int], timeout: int = 30):
         return json.loads(r.read().decode()).get("result", [])
 
 
-def poll_loop(simulation: bool = True, paper: bool = False, paper_path: Optional[str] = None):
+def poll_loop(simulation: bool = True, paper: bool = False, paper_path=None):
+    # paper_path：單一路徑字串，或 [(標籤, 路徑), ...] 多帳戶 (見 _try_broker)
     """持續監聽 Telegram 指令（阻塞），只處理設定好的 chat_id。給 `main.py listen` 用。"""
     from src.notify import TelegramNotifier
 

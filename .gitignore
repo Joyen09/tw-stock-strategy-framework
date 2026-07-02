@@ -4,6 +4,8 @@ config.yaml
 runtime.json
 paper_account.json
 paper_account.json.tmp
+paper_*.json
+paper_*.json.tmp
 *.pfx
 *.cer
 ca/

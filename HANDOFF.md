@@ -37,8 +37,15 @@
 - ❌ **不要再用永豐模擬盤空跑**：實測其 `list_positions` 回報會自己成長、每次查不同（見第 4 節第 9 點），
   無法當驗收依據。
 - ✅ **改用本地持久化模擬盤 `--paper`（已做好）**：假錢、自己記帳、接真實盤中價、跨執行累積、數字乾淨。
-- ⏳ **下一步：用 `--paper --realtime` 模式排程空跑 2–4 週**（`deploy/stockbot.service` 已預設模式 P）。
-  盤中每 5 分鐘自動撮合進 `paper_account.json`，手機 `/holdings` 看乾淨數字。
+- ✅ **策略比較完成（2026-07-02，tw50、含成本、--regime）**，結論：
+  - 多頭期 2023-07~2026-07：livermore 夏普 1.67 🥇（總報酬 162%）> oneil 1.25 > lynch 1.10 > momentum 0.97
+  - 含空頭期 2021-07~2024-07：lynch 夏普 1.51 🥇（**回撤僅 -7.2%**，防守王）> momentum 1.43 > livermore 1.30 > oneil 1.11
+  - livermore walkforward：訓練夏普 2.69 → 測試 1.19（沒看過的未來仍 +7.13%）→ **過關，不是背答案**
+  - **結論：lynch 防守核心 + livermore 進攻衛星，雙策略配置**；momentum 除役（兩期排名不穩 + 270 筆交易太頻繁）
+- ⏳ **下一步：雙策略空跑 2–4 週**：lynch 3萬/3檔（`stockbot.service` → paper_account.json）+
+  livermore 2萬/2檔（`stockbot-livermore.service` → paper_livermore.json，14:20 錯開），皆收盤後一天一次。
+  ✅ Telegram listener 已支援多帳戶：`/holdings` 合併顯示兩個策略帳戶（標籤+各自現金+總資產），
+  `/sell 2330` 自動路由到持有的帳戶、`/sell all` 全帳戶出清（`listen --paper` 預設就看兩個帳戶）。
 - ⏳ 空跑穩定後 → 才考慮小額真錢（需先走永豐實單開通審核：簽署+模擬環境測試+審核，見官網 signCenter）。
 
 ## 3. 環境與設定
