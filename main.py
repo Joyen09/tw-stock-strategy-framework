@@ -134,24 +134,52 @@ def cmd_backtest(args):
 
 
 def cmd_compare(args):
-    """一次回測多個策略，按夏普值排名輸出比較表。"""
+    """一次回測多個策略，按夏普值排名輸出比較表。
+
+    每個策略算完立即把結果存進 data_cache/（依 策略+股票池+期間+參數 產 key），
+    斷線/中斷後重跑會跳過已算完的策略，從斷點接著跑。
+    """
+    import hashlib
+    import json
+    from pathlib import Path
+
     from src.data.cache import DiskCachingProvider
 
     provider = DiskCachingProvider(_provider(args))
     symbols = _symbols(args, provider)
     names = args.strategy.split(",") if args.strategy else list(strategies.REGISTRY)
 
+    def _result_path(name: str) -> Path:
+        raw = "|".join([name, ",".join(symbols), args.start, args.end,
+                        str(args.regime), str(args.cash), str(args.fee_discount), str(args.cooldown)])
+        key = hashlib.md5(raw.encode()).hexdigest()[:12]
+        return Path("data_cache") / f"btres_{name}_{key}.json"
+
     print(f"比較 {len(names)} 個策略 × {len(symbols)} 檔股票（{args.start} ~ {args.end}）")
-    print("每個策略要逐日回測全部個股，約需數分鐘，請耐心等（下面會逐一回報進度）：\n")
+    print("每個策略要逐日回測全部個股，約需數分鐘（已算完的會存檔，斷線重跑可接續）：\n")
     rows = []
     for idx, name in enumerate(names, 1):
+        rp = _result_path(name)
+        if rp.exists():  # 之前算過（同股票池/期間/參數）→ 直接用存檔
+            try:
+                d = json.loads(rp.read_text())
+                rows.append((name, d["tr"], d["cagr"], d["mdd"], d["sharpe"], d["n"]))
+                print(f"  ✓ [{idx}/{len(names)}] {name}（讀取上次結果）：總報酬 {d['tr']:>7.2%}｜"
+                      f"夏普 {d['sharpe']:>5.2f}｜{d['n']} 筆交易", flush=True)
+                continue
+            except Exception:
+                pass  # 存檔壞了就重算
         print(f"  ▶ [{idx}/{len(names)}] 回測 {name} ...", flush=True)
         try:
             strat = strategies.build(name)
             bt = Backtester(provider, initial_cash=args.cash, fee_discount=args.fee_discount,
                             cooldown_days=args.cooldown, regime_filter=args.regime)
             r = bt.run(strat, symbols, args.start, args.end)
-            rows.append((name, r.total_return, r.cagr, r.max_drawdown, r.sharpe, len(r.trades)))
+            row = (name, r.total_return, r.cagr, r.max_drawdown, r.sharpe, len(r.trades))
+            rows.append(row)
+            rp.parent.mkdir(parents=True, exist_ok=True)
+            rp.write_text(json.dumps({"tr": row[1], "cagr": row[2], "mdd": row[3],
+                                      "sharpe": row[4], "n": row[5]}))
             print(f"    ✓ {name}：總報酬 {r.total_return:>7.2%}｜夏普 {r.sharpe:>5.2f}｜"
                   f"{len(r.trades)} 筆交易", flush=True)
         except Exception as e:
