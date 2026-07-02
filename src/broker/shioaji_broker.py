@@ -145,8 +145,10 @@ class ShioajiBroker(Broker):
             poss = self.api.list_positions(self.api.stock_account, unit=self.sj.constant.Unit.Share)
             for p in poss:
                 result.append(Position(symbol=p.code, shares=int(p.quantity), avg_price=float(p.price)))
-        except Exception:
-            # 舊版/不支援 unit 參數時退回：quantity 以「張」計，換算成股
+        except Exception as e:
+            # 舊版/不支援 unit 參數時退回：quantity 以「張」計，換算成股。
+            # ⚠️ 這條路徑會 ×1000，若誤觸會把零股放大成整張，故印警告方便診斷。
+            print(f"[Shioaji] ⚠️ list_positions(unit=Share) 失敗，退回 ×1000 換算路徑: {e}")
             for p in self.api.list_positions(self.api.stock_account):
                 result.append(Position(symbol=p.code, shares=int(p.quantity) * 1000, avg_price=float(p.price)))
         return result

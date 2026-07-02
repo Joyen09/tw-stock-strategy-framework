@@ -127,6 +127,31 @@ def test_regime_filter_allows_buys_in_bull_market():
     assert len(plans) == 1
 
 
+def test_max_order_value_rejects_oversized_buy():
+    # 保險絲：單筆買單金額超過上限就拒單 (防 sizing/報價/髒資料把金額放大)
+    provider = FakeProvider(price=600.0)
+    strat = FakeStrategy({"2330": (Action.BUY, 1.0)})
+    trader = LiveTrader(
+        provider, FakeBroker(), strat,
+        position_budget=10_000, dry_run=True,
+        max_order_value=5_000,  # 16 股 @600 = 9600 > 5000 -> 拒單
+    )
+    plans = trader.scan(["2330"], end="2026-06-30")
+    assert plans == []
+
+
+def test_max_order_value_default_allows_normal_buy():
+    # 正常買單 (金額 <= budget) 不受保險絲影響；預設上限 = budget*1.5
+    provider = FakeProvider(price=600.0)
+    strat = FakeStrategy({"2330": (Action.BUY, 1.0)})
+    trader = LiveTrader(
+        provider, FakeBroker(), strat,
+        position_budget=10_000, dry_run=True,  # max_order_value 預設 = 15000
+    )
+    plans = trader.scan(["2330"], end="2026-06-30")
+    assert len(plans) == 1  # 16 股 @600 = 9600 < 15000，正常放行
+
+
 def test_paused_blocks_buys_but_allows_sells():
     provider = FakeProvider(price=100.0)
     strat = FakeStrategy({

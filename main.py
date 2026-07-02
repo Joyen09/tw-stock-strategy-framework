@@ -282,6 +282,7 @@ def cmd_scan(args):
         regime_filter=args.regime,
         max_positions=max_pos,
         paused=paused,
+        max_order_value=args.max_order_value,
     )
     plans = trader.scan(symbols, end)
     if paused:
@@ -443,6 +444,8 @@ def build_parser():
     sc.add_argument("--end", default="", help="掃描的基準日期 (預設今天)")
     sc.add_argument("--cash", type=float, default=1_000_000)
     sc.add_argument("--budget", type=float, default=200_000, help="單檔最大投入金額")
+    sc.add_argument("--max-order-value", type=float, default=None,
+                    help="單筆買單金額上限保險絲 (預設 budget*1.5)；設 0 關閉")
     sc.add_argument("--source", choices=["sample", "finmind"], default="sample")
     sc.add_argument("--live", action="store_true", help="真的送單 (預設只 dry-run)")
     sc.add_argument("--realtime", action="store_true", help="盤中用 Shioaji 即時報價更新今日 K (不下單也可)")

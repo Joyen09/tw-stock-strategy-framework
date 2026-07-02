@@ -46,12 +46,17 @@ class LiveTrader:
         regime_ma: int = 200,
         max_positions: int = 0,
         paused: bool = False,
+        max_order_value: Optional[float] = None,
     ):
         self.provider = provider
         self.broker = broker
         self.strategy = strategy
         self.position_budget = position_budget
         self.dry_run = dry_run
+        # 保險絲：單筆買單金額 (股數×價) 上限。正常路徑下 shares*price <= position_budget，
+        # 所以任何超過 position_budget*1.5 的買單都代表 sizing/報價/資料異常，直接拒單。
+        # None = 自動 (position_budget*1.5)；<=0 = 關閉保險絲。
+        self.max_order_value = position_budget * 1.5 if max_order_value is None else max_order_value
         self.lookback_days = lookback_days
         self.allow_odd_lot = allow_odd_lot
         # 最多同時持有幾檔 (只買訊號最強的前 N 檔)；0=不限制。
@@ -161,6 +166,14 @@ class LiveTrader:
 
     def _execute(self, plan: TradePlan) -> bool:
         """執行下單；回傳是否真的成交 (dry-run 視為假設成立)。"""
+        # 保險絲：買單金額異常放大時拒單 (賣出是出清持倉、金額本來就可能大，不設限)。
+        if plan.action == "BUY" and self.max_order_value > 0:
+            notional = plan.shares * plan.price
+            if notional > self.max_order_value:
+                print(f"[safety] ⛔ 拒絕 {plan.symbol} 買單：金額 {notional:,.0f} 超過單筆上限 "
+                      f"{self.max_order_value:,.0f}（股數={plan.shares} @ {plan.price:.2f}）")
+                plan.sent = False
+                return False
         if self.dry_run:
             return True
         side = OrderSide.BUY if plan.action == "BUY" else OrderSide.SELL
