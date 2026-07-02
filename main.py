@@ -443,6 +443,7 @@ def build_parser():
     bt = sub.add_parser("backtest", help="回測")
     bt.add_argument("--strategy", required=True)
     bt.add_argument("--symbols", default="", help="逗號分隔，如 2330,2454；留空用全部樣本股")
+    bt.add_argument("--universe", default="top15", help="未指定 --symbols 時的候選池: top15 或 tw50")
     bt.add_argument("--start", default="2024-01-01")
     bt.add_argument("--end", default="2025-12-31")
     bt.add_argument("--cash", type=float, default=1_000_000)
@@ -509,7 +510,8 @@ def build_parser():
     wf.set_defaults(func=cmd_walkforward)
 
     cp = sub.add_parser("compare", help="批次比較：所有策略跑同一批股票，按夏普排名")
-    cp.add_argument("--symbols", default="", help="逗號分隔股票；留空用樣本股")
+    cp.add_argument("--symbols", default="", help="逗號分隔股票；留空用樣本股/候選池")
+    cp.add_argument("--universe", default="top15", help="未指定 --symbols 時的候選池: top15 或 tw50")
     cp.add_argument("--strategy", default="", help="逗號分隔策略；留空=全部")
     cp.add_argument("--start", default="2024-01-01")
     cp.add_argument("--end", default="2025-12-31")
