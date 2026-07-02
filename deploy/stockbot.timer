@@ -1,18 +1,21 @@
-# systemd 計時器：台股盤中 (09:00–13:30) 每 5 分鐘觸發一次掃描。
+# systemd 計時器：台股每交易日收盤後 (14:00) 跑一次掃描。
 # 安裝：
 #   sudo cp deploy/stockbot.timer /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now stockbot.timer
 #   systemctl list-timers stockbot*      # 確認下次觸發時間
 [Unit]
-Description=Run stock scan every 5 min during TW market hours
+Description=Run stock scan once per trading day after close
 
 # 注意：請先把 VM 時區設成台北，否則時間會對不上：
 #   sudo timedatectl set-timezone Asia/Taipei
 [Timer]
-# 台股盤中 (09:00–13:30) 每 5 分鐘掃一次。
-# 09..13:00/5 = 09~13 時、每 5 分鐘 (含 13:00~13:30，13:30 後幾筆無妨)。
-OnCalendar=Mon-Fri 09..13:00/5
+# lynch/buffett/graham 這類「基本面」策略：PEG/EPS/營收 是季月才變的數字，一天掃一次就夠。
+# 每 5 分鐘掃 tw50 會瞬間打爆 FinMind 免費額度 (每檔要抓 5 種資料 ×50 檔 = ~250 次/回)。
+# 收盤 (13:30) 後跑，用當天完整日 K 收盤價撮合。
+# ⚠️ 若改跑「動能突破」策略 (livermore/oneil) 想要盤中即時進出，才需改回 09..13:00/5 +
+#    --realtime，且務必縮小 universe 或改用付費 FinMind / Shioaji 歷史 K，否則會爆額度。
+OnCalendar=Mon-Fri 14:00
 Persistent=false
 
 [Install]

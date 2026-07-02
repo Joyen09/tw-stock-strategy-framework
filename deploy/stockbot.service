@@ -18,10 +18,11 @@ EnvironmentFile=-/home/YOUR_USER/stock/.env
 # --max-positions 5 = 最多同時持有 5 檔 (5萬建議搭 --budget 10000，每檔約1萬)
 #  A. 純通知 dry-run（不下單，只推 Telegram）—— 最安全
 # ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py scan --strategy lynch --source finmind --universe tw50 --realtime --regime --max-positions 5 --budget 10000 --notify
-#  P. 本地持久化模擬盤（假錢、自己記帳、接真實盤中價）—— 目前選用，最推薦的空跑方式。
+#  P. 本地持久化模擬盤（假錢、自己記帳、收盤後用當天日 K 撮合）—— 目前選用，最推薦的空跑方式。
 #     持倉存 paper_account.json、跨執行累積、數字乾淨可信 (不用永豐模擬盤——其回報實測不可靠)。
+#     搭 timer 收盤後(14:00)一天跑一次；lynch 是基本面策略不需盤中即時價，也省 FinMind 額度。
 #     --cash 50000 只在首次建檔時生效；要重置就刪掉 paper_account.json。
-ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py scan --strategy lynch --source finmind --universe tw50 --realtime --regime --max-positions 5 --budget 10000 --cash 50000 --paper --notify
+ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py scan --strategy lynch --source finmind --universe tw50 --regime --max-positions 5 --budget 10000 --cash 50000 --paper --notify
 #  B. Shioaji 模擬盤全自動（假錢自動下單）—— 不建議：永豐模擬盤持倉/成交回報實測會亂噴。
 # ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py scan --strategy lynch --source finmind --universe tw50 --realtime --regime --max-positions 5 --budget 10000 --live --notify
 #  C. 實單全自動（真錢！需先設定憑證 SHIOAJI_CA_PATH 等）—— 確認 P 模式空跑穩定才開
