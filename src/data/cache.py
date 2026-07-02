@@ -68,12 +68,23 @@ class DiskCachingProvider(DataProvider):
         self.dir.mkdir(parents=True, exist_ok=True)
         self._h_ttl = history_ttl
         self._f_ttl = fundamentals_ttl
+        self._prune()
         # 記憶體二級快取（同 process 內避免重複讀磁碟）
         self._mem_h: dict = {}
         self._mem_f: dict = {}
         self._mem_b: dict = {}
 
     # --- 內部工具 ---
+
+    def _prune(self, max_age: int = 14 * _DAY) -> None:
+        """清掉超過 14 天的快取檔。scan 每天 end 日期不同會產新 key，不清會無限累積。"""
+        try:
+            now = time.time()
+            for p in self.dir.glob("*.pkl"):
+                if now - p.stat().st_mtime > max_age:
+                    p.unlink(missing_ok=True)
+        except Exception:
+            pass  # 清不掉就算了，不影響功能
 
     def _path(self, name: str) -> Path:
         return self.dir / f"{name}.pkl"

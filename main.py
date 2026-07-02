@@ -282,8 +282,12 @@ def cmd_walkforward(args):
 
 
 def cmd_scan(args):
+    from src.data.cache import DiskCachingProvider
+
     end = args.end or _today()  # 未指定則用今天 (實盤掃描要看最新)
-    provider = _provider(args)
+    # 磁碟快取：財報 7 天 TTL 直接重用 (compare/前次 scan 抓過就不再抓)，
+    # 價格 key 含日期所以每天自然重抓一次；同日重試 (crash/斷線) 幾乎不耗額度。
+    provider = DiskCachingProvider(_provider(args))
     symbols = _symbols(args, provider)
     strat = strategies.build(args.strategy)
     # Telegram 通知：加 --notify 且環境變數有設才會啟用
