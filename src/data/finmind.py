@@ -151,7 +151,7 @@ class FinMindProvider(DataProvider):
 
         return f
 
-    def benchmark(self, start: str, end: str, timeout: float = 30.0) -> Optional[pd.Series]:
+    def benchmark(self, start: str, end: str, timeout: float = 15.0) -> Optional[pd.Series]:
         """抓加權指數 (TAIEX) 當大盤基準。
 
         FinMind 的 TAIEX 請求偶爾會卡住不回應 (連線 hang，沒有內建 timeout)，
@@ -170,10 +170,12 @@ class FinMindProvider(DataProvider):
             except Exception as e:  # pragma: no cover
                 box["err"] = e
 
+        print(f"  抓 TAIEX 大盤基準中 (最多等 {timeout:.0f} 秒，逾時改用備援基準)...", flush=True)
         t = threading.Thread(target=_fetch, daemon=True)
         t.start()
         t.join(timeout)
         if t.is_alive():  # 逾時：放棄這條 hung 的執行緒 (daemon 不擋程式結束)
+            print("  TAIEX 逾時，放棄。", flush=True)
             return None
         df = box.get("df")
         if df is None or df.empty:

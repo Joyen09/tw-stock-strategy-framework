@@ -123,15 +123,20 @@ class DiskCachingProvider(DataProvider):
         self._mem_f[symbol] = data
         return data
 
+    _NONE = "__NONE__"  # 磁碟哨兵：記住「這次 TAIEX 抓不到」，避免每次重跑都再等一次逾時
+
     def benchmark(self, start: str, end: str) -> Optional[pd.Series]:
         key = (start, end)
         if key in self._mem_b:
             return self._mem_b[key]
         slug = f"bm_{start}_{end}".replace("-", "")
-        data = self._load(self._path(slug), self._h_ttl)
-        if data is None:
+        cached = self._load(self._path(slug), self._h_ttl)
+        if cached is not None:
+            # cached 可能是 Series，或哨兵字串代表「上次抓不到」
+            data = None if isinstance(cached, str) and cached == self._NONE else cached
+        else:
             data = self.inner.benchmark(start, end)
-            self._save(self._path(slug), data)
+            self._save(self._path(slug), self._NONE if data is None else data)
         self._mem_b[key] = data
         return data
 
