@@ -125,6 +125,7 @@ python main.py list                                   # 列策略
 python main.py backtest --strategy lynch --regime --trades          # 回測
 python main.py pick --strategy lynch --source finmind --regime --top 5   # 選股
 python main.py walkforward --strategy lynch --source finmind --regime    # 防過度配適驗證
+python main.py compare --strategy lynch,momentum,livermore,oneil --source finmind --universe tw50 --start 2024-07-01 --end 2026-07-01 --regime   # 慢層vs快層 2年比較
 python main.py compare --source finmind --symbols ... --regime      # 策略比較
 python main.py scan --strategy lynch --source finmind --universe tw50 --regime --paper --cash 50000 --max-positions 5 --budget 10000 --notify   # 本地持久化模擬盤(推薦空跑方式,收盤後一天一次)
 python main.py listen --paper                          # Telegram 遙控 + /holdings /sell 對本地模擬盤帳戶
@@ -143,7 +144,7 @@ src/
 ├── models.py         # Signal / Fundamentals / Position
 ├── indicators.py     # 技術指標
 ├── control.py        # runtime.json 設定 + Telegram 雙向監聽
-├── strategies/       # buffett/graham/lynch/oneil/livermore/us_overnight
+├── strategies/       # buffett/graham/lynch/oneil/livermore/momentum(短線快層)/us_overnight
 ├── data/             # sample(離線) / finmind(真實) / us_lead / cache / universe
 ├── broker/           # paper(記憶體模擬) / persistent_paper(可持久化模擬,推薦空跑) / shioaji_broker(實單) / fees(台股成本)
 └── engine/           # backtest(回測) / trader(實盤 scan) / screener

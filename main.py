@@ -100,6 +100,8 @@ def cmd_list(args):
         "lynch": "彼得林區 — 成長合理價 GARP (PEG<=1.2、穩健成長)",
         "oneil": "歐尼爾 — CANSLIM/帶量突破 52 週新高 + 相對強弱",
         "livermore": "李佛摩 — 順勢突破關鍵點 + ATR 移動停損",
+        "momentum": "短線動能 — 帶量突破 20 日高點 + 均線多頭 + 緊停損 (快層)",
+        "us_overnight": "美股隔夜 — 追蹤 ^SOX / TSM ADR 隔夜漲跌 (需 yfinance)",
     }
     for key in strategies.REGISTRY:
         print(f"  {key:<10} {titles.get(key, '')}")

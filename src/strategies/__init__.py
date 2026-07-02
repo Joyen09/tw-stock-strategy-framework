@@ -5,6 +5,7 @@ from .graham import GrahamStrategy
 from .lynch import LynchStrategy
 from .oneil import ONeilStrategy
 from .livermore import LivermoreStrategy
+from .momentum import MomentumStrategy
 from .us_overnight import USOvernightStrategy
 
 # 名稱 -> 策略類別，供 CLI / 設定檔以字串選用。
@@ -14,6 +15,7 @@ REGISTRY = {
     "lynch": LynchStrategy,
     "oneil": ONeilStrategy,
     "livermore": LivermoreStrategy,
+    "momentum": MomentumStrategy,
     "us_overnight": USOvernightStrategy,
 }
 
@@ -34,6 +36,7 @@ __all__ = [
     "LynchStrategy",
     "ONeilStrategy",
     "LivermoreStrategy",
+    "MomentumStrategy",
     "USOvernightStrategy",
     "REGISTRY",
     "build",
