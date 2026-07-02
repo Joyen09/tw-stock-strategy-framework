@@ -298,7 +298,7 @@ def cmd_scan(args):
         # 本地持久化模擬盤：假錢、自己記帳、跨執行累積；可搭 --realtime 用 Shioaji 即時價當撮合價。
         # (取代永豐模擬盤——其持倉/成交回報實測不可靠)
         from src.broker.persistent_paper import PersistentPaperBroker
-        paper_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "paper_account.json")
+        paper_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), args.paper_file)
         broker = PersistentPaperBroker(path=paper_path, cash=args.cash)
         dry_run = False  # --paper 會真的撮合進本地帳戶，不是 dry-run
         if args.realtime:
@@ -404,7 +404,7 @@ def cmd_fundamentals(args):
 def cmd_listen(args):
     """持續監聽 Telegram 指令 (/budget /maxpos /pause /resume /status /holdings /sell)。"""
     from src.control import poll_loop
-    paper_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "paper_account.json")
+    paper_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), args.paper_file)
     try:
         poll_loop(
             simulation=not args.real_account,
@@ -501,6 +501,8 @@ def build_parser():
                     help="單筆買單金額上限保險絲 (預設 budget*1.5)；設 0 關閉")
     sc.add_argument("--source", choices=["sample", "finmind"], default="sample")
     sc.add_argument("--live", action="store_true", help="真的送單 (預設只 dry-run)")
+    sc.add_argument("--paper-file", default="paper_account.json",
+                    help="本地模擬盤帳戶檔名 (跑多策略時各給一個檔，帳戶才不會互相干擾)")
     sc.add_argument("--paper", action="store_true",
                     help="本地持久化模擬盤 (假錢、自己記帳、跨執行累積)；建議搭 --realtime 用即時價。取代永豐模擬盤")
     sc.add_argument("--realtime", action="store_true", help="盤中用 Shioaji 即時報價更新今日 K (不下單也可)")
@@ -573,6 +575,8 @@ def build_parser():
     ls.add_argument("--real-account", action="store_true", help="/holdings /sell 用實單帳戶 (預設模擬盤)")
     ls.add_argument("--paper", action="store_true",
                     help="/holdings /sell 對本地持久化模擬盤帳戶 (需與 scan --paper 搭配)")
+    ls.add_argument("--paper-file", default="paper_account.json",
+                    help="本地模擬盤帳戶檔名 (需與 scan --paper-file 一致)")
     ls.set_defaults(func=cmd_listen)
     sub.add_parser("notify-test", help="送一則 Telegram 測試訊息").set_defaults(func=cmd_notify_test)
     sub.add_parser("notify-chatid", help="查詢自己的 Telegram chat_id").set_defaults(func=cmd_notify_chatid)
