@@ -100,6 +100,12 @@ def handle_broker_command(text: str, broker) -> str:
     if broker is None:
         return "此指令需要 Shioaji 連線；等你 API 金鑰設定好、模擬盤接上後就能用。"
 
+    # 本地持久化模擬盤：重讀磁碟，讓 /holdings /sell 反映排程 scan 這段時間寫入的最新狀態。
+    if hasattr(broker, "reload"):
+        broker.reload()
+    # PaperBroker 系需帶價格才能撮合 (賣出用持倉均價成交)；Shioaji 用 None=市價。
+    is_paper = hasattr(broker, "account")
+
     if cmd in ("holdings", "positions"):
         ps = [p for p in broker.positions() if p.shares > 0]
         if not ps:
@@ -124,14 +130,19 @@ def handle_broker_command(text: str, broker) -> str:
             return f"找不到 {arg} 的持倉"
         done = []
         for p in targets:
-            broker.place_order(Order(p.symbol, OrderSide.SELL, p.shares, None, "Telegram 手動賣出"))
+            price = p.avg_price if is_paper else None  # 模擬盤用均價撮合；實單/Shioaji 用市價
+            broker.place_order(Order(p.symbol, OrderSide.SELL, p.shares, price, "Telegram 手動賣出"))
             done.append(f"{p.symbol} {p.shares} 股")
-        return "🔴 已送出市價賣單：\n　" + "\n　".join(done)
+        return "🔴 已送出賣單：\n　" + "\n　".join(done)
 
     return ""
 
 
-def _try_broker(simulation: bool = True):
+def _try_broker(simulation: bool = True, paper: bool = False, paper_path: Optional[str] = None):
+    if paper:
+        # 本地持久化模擬盤：/holdings /sell 對這個帳戶 (與 scan --paper 同一個 JSON 檔)
+        from src.broker.persistent_paper import PersistentPaperBroker
+        return PersistentPaperBroker(path=paper_path)
     try:
         from src.broker.shioaji_broker import ShioajiBroker
         return ShioajiBroker(simulation=simulation)
@@ -153,7 +164,7 @@ def _get_updates(token: str, offset: Optional[int], timeout: int = 30):
         return json.loads(r.read().decode()).get("result", [])
 
 
-def poll_loop(simulation: bool = True):
+def poll_loop(simulation: bool = True, paper: bool = False, paper_path: Optional[str] = None):
     """持續監聽 Telegram 指令（阻塞），只處理設定好的 chat_id。給 `main.py listen` 用。"""
     from src.notify import TelegramNotifier
 
@@ -163,7 +174,8 @@ def poll_loop(simulation: bool = True):
         print("未設定 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID，無法監聽。")
         return
     notifier = TelegramNotifier()
-    broker = _try_broker(simulation)  # 沒有 API 也能跑，只是 /holdings /sell 暫不可用
+    # 沒有 API 也能跑，只是 /holdings /sell 暫不可用；paper=True 則對本地持久化模擬盤帳戶
+    broker = _try_broker(simulation, paper=paper, paper_path=paper_path)
     notifier.send("🤖 控制器已上線。傳 /help 看指令、/status 查設定。")
     print("監聽中... (Ctrl+C 結束)")
 

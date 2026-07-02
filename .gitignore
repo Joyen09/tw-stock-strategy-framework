@@ -2,6 +2,8 @@
 config.yaml
 .env
 runtime.json
+paper_account.json
+paper_account.json.tmp
 *.pfx
 *.cer
 ca/

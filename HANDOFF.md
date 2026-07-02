@@ -32,10 +32,14 @@
 - ✅ scan 動態選股：`--universe tw50 --max-positions 5` 自動挑訊號最強的 N 檔、換股補位
 - ✅ 逐日行為模擬 `examples/simulate_days.py`（已驗證鋪倉/續抱/換股）
 
-**待辦（下一步）**：
-- ⏳ **明天平日盤中（09:00–13:30）做乾淨的 --live 測試**，確認零股正確成交（見第 5 節）
-- ⏳ 驗證 OK 後 → 啟用 `stockbot.timer` systemd 排程，進入全自動
-- ⏳ 模擬盤空跑 2–4 週穩定後 → 才考慮小額真錢（需開通實單權限）
+**待辦（下一步）** — ⚠️ 2026-07-02 有重大調整，見下：
+- ✅ 下單正確性**已驗證**：--live 送單 order dump 證實送的是精準小零股（2891×105 等）。
+- ❌ **不要再用永豐模擬盤空跑**：實測其 `list_positions` 回報會自己成長、每次查不同（見第 4 節第 9 點），
+  無法當驗收依據。
+- ✅ **改用本地持久化模擬盤 `--paper`（已做好）**：假錢、自己記帳、接真實盤中價、跨執行累積、數字乾淨。
+- ⏳ **下一步：用 `--paper --realtime` 模式排程空跑 2–4 週**（`deploy/stockbot.service` 已預設模式 P）。
+  盤中每 5 分鐘自動撮合進 `paper_account.json`，手機 `/holdings` 看乾淨數字。
+- ⏳ 空跑穩定後 → 才考慮小額真錢（需先走永豐實單開通審核：簽署+模擬環境測試+審核，見官網 signCenter）。
 
 ## 3. 環境與設定
 
@@ -118,7 +122,9 @@ python main.py backtest --strategy lynch --regime --trades          # 回測
 python main.py pick --strategy lynch --source finmind --regime --top 5   # 選股
 python main.py walkforward --strategy lynch --source finmind --regime    # 防過度配適驗證
 python main.py compare --source finmind --symbols ... --regime      # 策略比較
-python main.py scan --strategy lynch --source finmind --regime --realtime --live --max-positions 5 --budget 10000 --notify   # 模擬盤自動交易
+python main.py scan --strategy lynch --source finmind --universe tw50 --regime --realtime --paper --cash 50000 --max-positions 5 --budget 10000 --notify   # 本地持久化模擬盤(推薦空跑方式)
+python main.py listen --paper                          # Telegram 遙控 + /holdings /sell 對本地模擬盤帳戶
+# python main.py scan ... --live --notify              # (不建議) 打永豐模擬盤，其持倉回報不可靠
 python main.py shioaji-test                           # 測 Shioaji 連線/持倉
 python main.py listen                                 # Telegram 遙控監聽
 python main.py notify-test                            # 測 Telegram 通知
@@ -135,7 +141,7 @@ src/
 ├── control.py        # runtime.json 設定 + Telegram 雙向監聽
 ├── strategies/       # buffett/graham/lynch/oneil/livermore/us_overnight
 ├── data/             # sample(離線) / finmind(真實) / us_lead / cache / universe
-├── broker/           # paper(模擬) / shioaji_broker(實單) / fees(台股成本)
+├── broker/           # paper(記憶體模擬) / persistent_paper(可持久化模擬,推薦空跑) / shioaji_broker(實單) / fees(台股成本)
 └── engine/           # backtest(回測) / trader(實盤 scan) / screener
 main.py               # CLI 入口（list/backtest/compare/pick/walkforward/screen/scan/listen/shioaji-test...）
 examples/simulate_days.py   # 逐日持倉模擬

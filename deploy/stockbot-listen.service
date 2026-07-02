@@ -15,7 +15,9 @@ Type=simple
 User=YOUR_USER
 WorkingDirectory=/home/YOUR_USER/stock
 EnvironmentFile=-/home/YOUR_USER/stock/.env
-ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py listen
+# --paper：/holdings /sell 對本地持久化模擬盤帳戶 (與 scan 的 P 模式同一個 paper_account.json)。
+# 若 scan 用 Shioaji 模擬盤/實單 (B/C 模式)，就把 --paper 拿掉，改對券商帳戶。
+ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py listen --paper
 Restart=always
 RestartSec=10
 MemoryMax=200M
