@@ -151,11 +151,31 @@ class FinMindProvider(DataProvider):
 
         return f
 
-    def benchmark(self, start: str, end: str) -> Optional[pd.Series]:
-        try:
-            df = self.api.taiwan_stock_daily(stock_id="TAIEX", start_date=start, end_date=end)
-        except Exception:  # pragma: no cover
+    def benchmark(self, start: str, end: str, timeout: float = 30.0) -> Optional[pd.Series]:
+        """抓加權指數 (TAIEX) 當大盤基準。
+
+        FinMind 的 TAIEX 請求偶爾會卡住不回應 (連線 hang，沒有內建 timeout)，
+        用 daemon 執行緒 + join(timeout) 包起來：逾時就放棄回 None，讓上層改用
+        備援基準 (例如選股池等權平均)，程式不會被單一請求卡死。
+        """
+        import threading
+
+        box: dict = {}
+
+        def _fetch():
+            try:
+                box["df"] = self.api.taiwan_stock_daily(
+                    stock_id="TAIEX", start_date=start, end_date=end
+                )
+            except Exception as e:  # pragma: no cover
+                box["err"] = e
+
+        t = threading.Thread(target=_fetch, daemon=True)
+        t.start()
+        t.join(timeout)
+        if t.is_alive():  # 逾時：放棄這條 hung 的執行緒 (daemon 不擋程式結束)
             return None
+        df = box.get("df")
         if df is None or df.empty:
             return None
         df["date"] = pd.to_datetime(df["date"])

@@ -130,6 +130,12 @@ class Backtester:
         if getattr(strategy, "requires_fundamentals", False):
             funds = {s: self.provider.fundamentals(s) for s in symbols}
         bench_full = self.provider.benchmark(start, end)
+        # TAIEX 抓不到 (逾時/限額) 但要用風向濾網時，用選股池等權平均自建大盤代理，
+        # regime 照常運作、且完全不需額外 API 請求 (資料已在手)。
+        if self.regime_filter and bench_full is None:
+            bench_full = self._synthetic_benchmark(data)
+            if bench_full is not None:
+                print("[regime] ⚠️ 抓不到 TAIEX，改用選股池等權平均當大盤代理")
 
         # 統一交易日曆 (所有股票日期聯集)。
         all_dates = sorted(set().union(*[set(df.index) for df in data.values() if not df.empty]))
@@ -199,6 +205,23 @@ class Backtester:
 
         curve = pd.Series(dict(equity)).sort_index()
         return BacktestResult(curve, trades, self.initial_cash)
+
+    @staticmethod
+    def _synthetic_benchmark(data: Dict[str, pd.DataFrame]) -> Optional[pd.Series]:
+        """用選股池個股收盤價組一條等權「大盤代理」指數，當 TAIEX 的備援。
+
+        每檔正規化到起點=1 (消除股價高低差)，再取橫向平均 -> 一條平滑的市場指數，
+        足以支撐 200 日年線的多空風向判斷。純用已載入的資料，不打任何 API。
+        """
+        closes = [df["close"] for df in data.values() if not df.empty]
+        if not closes:
+            return None
+        mat = pd.concat(closes, axis=1).sort_index().ffill()
+        base = mat.bfill().iloc[0]           # 各欄第一個有效值
+        base = base.replace(0, pd.NA)
+        norm = mat.divide(base, axis=1)      # 每檔正規化到起點=1
+        idx = norm.mean(axis=1, skipna=True)
+        return idx.dropna()
 
     def _equity(self, broker: PaperBroker, data: Dict[str, pd.DataFrame], date) -> float:
         prices = {}
