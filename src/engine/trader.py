@@ -156,7 +156,7 @@ class LiveTrader:
             if self._execute(plan):  # 只記錄真的成交的
                 plans.append(plan)
 
-        # 買進：只挑訊號最強的，且不超過最大持倉檔數 (避免資金被擒太散)
+        # 買進：只挑訊號最強的，且不超過最大持倉檔數 (避免資金被撒太散)
         buy_cands.sort(key=lambda x: x[0], reverse=True)
         held = len([p for p in self.broker.positions() if p.shares > 0])
         if self.paused:  # 暫停中：只出場、不買進
