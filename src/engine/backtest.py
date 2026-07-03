@@ -129,6 +129,10 @@ class Backtester:
         funds = {}
         if getattr(strategy, "requires_fundamentals", False):
             funds = {s: self.provider.fundamentals(s) for s in symbols}
+        # 籌碼 (三大法人買賣超)：只有籌碼類策略才抓。
+        chips_all: Dict[str, Optional[pd.DataFrame]] = {}
+        if getattr(strategy, "requires_chips", False):
+            chips_all = {s: self.provider.institutional(s, start, end) for s in symbols}
         bench_full = self.provider.benchmark(start, end)
         # TAIEX 抓不到 (逾時/限額) 但要用風向濾網時，用選股池等權平均自建大盤代理，
         # regime 照常運作、且完全不需額外 API 請求 (資料已在手)。
@@ -167,12 +171,18 @@ class Backtester:
                 if bench_full is not None:
                     bench = bench_full.reindex(window.index).ffill()
 
+                # 籌碼只餵「前一交易日(含)以前」：法人資料盤後才公布，避免偷看當日籌碼 (T+1 執行)。
+                chips_win = None
+                ch = chips_all.get(sym)
+                if ch is not None and not ch.empty:
+                    chips_win = ch[ch.index < date]
                 ctx = StrategyContext(
                     symbol=sym,
                     prices=window,
                     fundamentals=funds.get(sym),
                     benchmark=bench,
                     position=pos if pos.shares > 0 else None,
+                    chips=chips_win,
                 )
                 sig = strategy.evaluate(ctx)
 
