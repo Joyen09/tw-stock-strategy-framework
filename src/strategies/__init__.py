@@ -7,6 +7,9 @@ from .oneil import ONeilStrategy
 from .livermore import LivermoreStrategy
 from .mclean import McLeanStrategy
 from .momentum import MomentumStrategy
+from .trust import TrustStrategy
+from .floor import FloorStrategy
+from .raiho import RaihoStrategy
 from .us_overnight import USOvernightStrategy
 
 # 名稱 -> 策略類別，供 CLI / 設定檔以字串選用。
@@ -18,6 +21,9 @@ REGISTRY = {
     "livermore": LivermoreStrategy,
     "mclean": McLeanStrategy,
     "momentum": MomentumStrategy,
+    "trust": TrustStrategy,
+    "floor": FloorStrategy,
+    "raiho": RaihoStrategy,
     "us_overnight": USOvernightStrategy,
 }
 
@@ -40,6 +46,9 @@ __all__ = [
     "LivermoreStrategy",
     "McLeanStrategy",
     "MomentumStrategy",
+    "TrustStrategy",
+    "FloorStrategy",
+    "RaihoStrategy",
     "USOvernightStrategy",
     "REGISTRY",
     "build",

@@ -53,6 +53,7 @@ class Fundamentals:
     current_ratio: Optional[float] = None   # 流動比率 (%)
     gross_margin: Optional[float] = None    # 毛利率 (%)
     market_cap: Optional[float] = None      # 市值 (億元)
+    fcf: Optional[float] = None             # 近四季自由現金流 (營業現金流-資本支出，元)
     extra: dict = field(default_factory=dict)
 
     @property
