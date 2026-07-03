@@ -1,4 +1,4 @@
-"""地板股搝反彈 (策略 G)——跌到「個股統計極端乖離」且爆量，搝短線過度反應的反彈。
+"""地板股搶反彈 (策略 G)——跌到「個股統計極端乖離」且爆量，搶短線過度反應的反彈。
 
 來源：權證小哥招牌短線的量化詮釋 (非本人背書)。核心概念「地板線」：
 不用固定 -30% 乖離一體適用，而是取**這檔股票自己**的月線乖離歷史分布的
@@ -12,7 +12,7 @@
 
 出場 (任一觸發，短進短出)：
 1. 反彈回到 20 日均線 (乖離修復完成，反彈波吃完)
-2. 停損 -4% (搝反彈像搝銀行，不對就跑)
+2. 停損 -4% (搶反彈像搶銀行，不對就跑)
 
 備註：spec 的「排除主力持續大賣出貨中」需要券商分點資料 (付費限定)，本實作
 省略——這是純價量簡化版。「T+1 殺低爆量才進、買黑不買紅」的日內擇時在日線
@@ -65,7 +65,7 @@ class FloorStrategy(Strategy):
         if held:
             entry = ctx.position.avg_price
             if entry > 0 and price <= entry * (1 - p["stop_loss"]):
-                return self._signal(Action.SELL, 1.0, f"停損 -{p['stop_loss']:.0%}，搝反彈失敗快跑", ctx.symbol)
+                return self._signal(Action.SELL, 1.0, f"停損 -{p['stop_loss']:.0%}，搶反彈失敗快跑", ctx.symbol)
             if price >= ma.iloc[-1]:
                 return self._signal(Action.SELL, 1.0, "反彈回月線，乖離修復完成獲利了結", ctx.symbol)
             return self._hold("持有中 (等反彈到月線或停損)")
@@ -87,6 +87,6 @@ class FloorStrategy(Strategy):
         strength = min(1.0, 0.6 + depth * 0.8)
         return self._signal(
             Action.BUY, strength,
-            f"觸及地板線 (乖離 {cur_bias:.1%}，歷史 P{p['floor_pct']*100:.0f}) 且爆量，搝過度反應反彈",
+            f"觸及地板線 (乖離 {cur_bias:.1%}，歷史 P{p['floor_pct']*100:.0f}) 且爆量，搶過度反應反彈",
             ctx.symbol,
         )
