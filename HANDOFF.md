@@ -47,6 +47,12 @@
   ✅ Telegram listener 已支援多帳戶：`/holdings` 合併顯示兩個策略帳戶（標籤+各自現金+總資產），
   `/sell 2330` 自動路由到持有的帳戶、`/sell all` 全帳戶出清（`listen --paper` 預設就看兩個帳戶）。
 - ⏳ 空跑穩定後 → 才考慮小額真錢（需先走永豐實單開通審核：簽署+模擬環境測試+審核，見官網 signCenter）。
+- 🆕 **策略 K `mclean`（麥克連法人跟單）已實作（2026-07-03）**，來自使用者上傳的多流派 spec：
+  - 資料層新增三大法人買賣超（FinMind 免費版可用，`institutional()`，已接磁碟快取，tw50 一次 ~50 請求）
+  - 紅色標記=投信外資同買(0.9)、藍色=單邊連買2日(0.65)；技術面過濾=週線10>20週+日線均線多頭+KD金叉+MACD翻多+上漲量增
+  - 出場=+10%落袋 / 5日線乖離10% / 破10日線 / -7%停損；回測引擎已做籌碼 T+1 切片防前視
+  - **待跑三關驗證**（回測+2022壓測+walkforward），贏過 livermore 才考慮部署
+  - spec 其餘策略分類：🟢可做=P(雷浩斯)/G純價量版/A簡化版；🔴卡付費資料=B/C/F/H/I/J(要FinMind贊助會員的分點資料)、N/O(要TAIFEX選擇權)
 
 ## 3. 環境與設定
 
@@ -133,6 +139,7 @@ python main.py backtest --strategy lynch --regime --trades          # 回測
 python main.py pick --strategy lynch --source finmind --regime --top 5   # 選股
 python main.py walkforward --strategy lynch --source finmind --regime    # 防過度配適驗證
 python main.py compare --strategy lynch,momentum,livermore,oneil --source finmind --universe tw50 --start 2024-07-01 --end 2026-07-01 --regime   # 慢層vs快層 2年比較
+python main.py compare --strategy mclean,lynch,livermore --source finmind --universe tw50 --start 2023-07-01 --end 2026-07-01 --regime   # 麥克連法人跟單 vs 現任雙雄
 python main.py compare --source finmind --symbols ... --regime      # 策略比較
 python main.py scan --strategy lynch --source finmind --universe tw50 --regime --paper --cash 50000 --max-positions 5 --budget 10000 --notify   # 本地持久化模擬盤(推薦空跑方式,收盤後一天一次)
 python main.py listen --paper                          # Telegram 遙控 + /holdings /sell 對本地模擬盤帳戶
@@ -151,7 +158,7 @@ src/
 ├── models.py         # Signal / Fundamentals / Position
 ├── indicators.py     # 技術指標
 ├── control.py        # runtime.json 設定 + Telegram 雙向監聽
-├── strategies/       # buffett/graham/lynch/oneil/livermore/momentum(短線快層)/us_overnight
+├── strategies/       # buffett/graham/lynch/oneil/livermore/mclean(法人籌碼)/momentum(短線快層)/us_overnight
 ├── data/             # sample(離線) / finmind(真實) / us_lead / cache / universe
 ├── broker/           # paper(記憶體模擬) / persistent_paper(可持久化模擬,推薦空跑) / shioaji_broker(實單) / fees(台股成本)
 └── engine/           # backtest(回測) / trader(實盤 scan) / screener

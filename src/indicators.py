@@ -32,6 +32,20 @@ def macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
     return macd_line, signal_line, macd_line - signal_line
 
 
+def kd(df: pd.DataFrame, window: int = 9, smooth: int = 3):
+    """KD 隨機指標 (台股慣用 9,3,3)，回傳 (K, D)。
+
+    df 需含 high / low / close 欄位。RSV = (收盤 - 近N日最低) / (近N日最高 - 近N日最低)。
+    """
+    low_min = df["low"].rolling(window).min()
+    high_max = df["high"].rolling(window).max()
+    rng = (high_max - low_min).replace(0, pd.NA)
+    rsv = (df["close"] - low_min) / rng * 100
+    k = rsv.ewm(alpha=1 / smooth, adjust=False).mean()
+    d = k.ewm(alpha=1 / smooth, adjust=False).mean()
+    return k, d
+
+
 def atr(df: pd.DataFrame, window: int = 14) -> pd.Series:
     """平均真實區間 ATR，用於設停損與評估波動。
 

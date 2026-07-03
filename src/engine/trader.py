@@ -123,12 +123,17 @@ class LiveTrader:
             price = float(df["close"].iloc[-1])
             pos = self._current_position(sym)
             b = bench.reindex(df.index).ffill() if bench is not None else None
+            # 籌碼類策略才抓法人買賣超；實盤用「已公布的全部資料」(法人盤後公布，天然無前視)。
+            chips = None
+            if getattr(self.strategy, "requires_chips", False):
+                chips = self.provider.institutional(sym, start, end)
             ctx = StrategyContext(
                 symbol=sym,
                 prices=df,
                 fundamentals=self.provider.fundamentals(sym),
                 benchmark=b,
                 position=pos,
+                chips=chips,
             )
             sig = self.strategy.evaluate(ctx)
             if not sig.is_actionable:

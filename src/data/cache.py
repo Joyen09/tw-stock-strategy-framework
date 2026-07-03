@@ -31,6 +31,7 @@ class CachingProvider(DataProvider):
         self._h: dict = {}
         self._f: dict = {}
         self._b: dict = {}
+        self._i: dict = {}
 
     def history(self, symbol: str, start: str, end: str) -> pd.DataFrame:
         key = (symbol, start, end)
@@ -48,6 +49,12 @@ class CachingProvider(DataProvider):
         if key not in self._b:
             self._b[key] = self.inner.benchmark(start, end)
         return self._b[key]
+
+    def institutional(self, symbol: str, start: str, end: str):
+        key = (symbol, start, end)
+        if key not in self._i:
+            self._i[key] = self.inner.institutional(symbol, start, end)
+        return self._i[key]
 
     def universe(self):
         return self.inner.universe()
@@ -73,6 +80,7 @@ class DiskCachingProvider(DataProvider):
         self._mem_h: dict = {}
         self._mem_f: dict = {}
         self._mem_b: dict = {}
+        self._mem_i: dict = {}
 
     # --- 內部工具 ---
 
@@ -149,6 +157,22 @@ class DiskCachingProvider(DataProvider):
             data = self.inner.benchmark(start, end)
             self._save(self._path(slug), self._NONE if data is None else data)
         self._mem_b[key] = data
+        return data
+
+    def institutional(self, symbol: str, start: str, end: str):
+        """三大法人買賣超 (籌碼)。TTL 同 history (1 天)：法人資料每個盤後更新一次。
+        抓不到時用哨兵記住，避免每次重跑都重打 API。"""
+        key = (symbol, start, end)
+        if key in self._mem_i:
+            return self._mem_i[key]
+        slug = f"i_{symbol}_{start}_{end}".replace("-", "")
+        cached = self._load(self._path(slug), self._h_ttl)
+        if cached is not None:
+            data = None if isinstance(cached, str) and cached == self._NONE else cached
+        else:
+            data = self.inner.institutional(symbol, start, end)
+            self._save(self._path(slug), self._NONE if data is None else data)
+        self._mem_i[key] = data
         return data
 
     def universe(self):

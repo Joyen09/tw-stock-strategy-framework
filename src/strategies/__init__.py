@@ -5,6 +5,7 @@ from .graham import GrahamStrategy
 from .lynch import LynchStrategy
 from .oneil import ONeilStrategy
 from .livermore import LivermoreStrategy
+from .mclean import McLeanStrategy
 from .momentum import MomentumStrategy
 from .us_overnight import USOvernightStrategy
 
@@ -15,6 +16,7 @@ REGISTRY = {
     "lynch": LynchStrategy,
     "oneil": ONeilStrategy,
     "livermore": LivermoreStrategy,
+    "mclean": McLeanStrategy,
     "momentum": MomentumStrategy,
     "us_overnight": USOvernightStrategy,
 }
@@ -36,6 +38,7 @@ __all__ = [
     "LynchStrategy",
     "ONeilStrategy",
     "LivermoreStrategy",
+    "McLeanStrategy",
     "MomentumStrategy",
     "USOvernightStrategy",
     "REGISTRY",

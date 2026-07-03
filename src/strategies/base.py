@@ -24,6 +24,8 @@ class StrategyContext:
     fundamentals: Optional[Fundamentals] = None
     benchmark: Optional[pd.Series] = None     # 大盤收盤價 (對齊 prices.index)，相對強弱用
     position: Optional[Position] = None       # 目前持倉，None 代表空手
+    chips: Optional[pd.DataFrame] = None      # 籌碼: trust_net/foreign_net (三大法人買賣超)。
+                                              # 法人資料盤後才公布 → 引擎只餵「前一交易日(含)以前」，天然 T+1
 
 
 class Strategy:
@@ -32,6 +34,8 @@ class Strategy:
     name = "base"
     #: 是否需要基本面資料，沒有就無法評估
     requires_fundamentals = False
+    #: 是否需要籌碼資料 (三大法人買賣超)，沒有就無法評估
+    requires_chips = False
     #: 至少需要幾根 K 棒才開始評估
     min_bars = 1
 
@@ -47,6 +51,8 @@ class Strategy:
         if len(ctx.prices) < self.min_bars:
             return False
         if self.requires_fundamentals and ctx.fundamentals is None:
+            return False
+        if self.requires_chips and (ctx.chips is None or ctx.chips.empty):
             return False
         return True
 

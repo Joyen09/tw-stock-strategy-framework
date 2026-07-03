@@ -23,6 +23,14 @@ class DataProvider:
         """回傳大盤 (加權指數) 收盤價，供相對強弱用。"""
         return None
 
+    def institutional(self, symbol: str, start: str, end: str) -> Optional[pd.DataFrame]:
+        """回傳三大法人每日買賣超 (張為單位可為股，只要一致)，無資料回 None。
+
+        欄位: trust_net (投信買賣超) / foreign_net (外資買賣超)，index 為日期。
+        籌碼類策略 (麥克連法人跟單等) 用；一般 provider 不必實作。
+        """
+        return None
+
     def universe(self) -> List[str]:
         """可交易/可回測的股票代號清單。"""
         return []

@@ -151,6 +151,37 @@ class FinMindProvider(DataProvider):
 
         return f
 
+    def institutional(self, symbol: str, start: str, end: str) -> Optional[pd.DataFrame]:
+        """三大法人每日買賣超 (股)。欄位 trust_net=投信、foreign_net=外資 (含外資自營)。
+
+        FinMind `taiwan_stock_institutional_investors` 免費版可用，long format:
+        date / name (Foreign_Investor, Investment_Trust, ...) / buy / sell。
+        注意: 法人資料約 15:00–16:00 盤後公布，訊號只能用於次一交易日 (T+1)，
+        回測引擎已用「只看前一日(含)以前」切片避免前視偏差。
+        """
+        try:
+            df = self.api.taiwan_stock_institutional_investors(
+                stock_id=symbol, start_date=start, end_date=end
+            )
+        except Exception:
+            return None
+        if df is None or df.empty or "name" not in df.columns:
+            return None
+        df = df.copy()
+        df["net"] = pd.to_numeric(df["buy"], errors="coerce") - pd.to_numeric(df["sell"], errors="coerce")
+        df["date"] = pd.to_datetime(df["date"])
+        piv = df.pivot_table(index="date", columns="name", values="net", aggfunc="sum")
+
+        def _sum(cols):
+            hits = [c for c in cols if c in piv.columns]
+            return piv[hits].sum(axis=1) if hits else pd.Series(0.0, index=piv.index)
+
+        out = pd.DataFrame({
+            "trust_net": _sum(["Investment_Trust"]),
+            "foreign_net": _sum(["Foreign_Investor", "Foreign_Dealer_Self"]),
+        }).sort_index()
+        return out
+
     def benchmark(self, start: str, end: str, timeout: float = 15.0) -> Optional[pd.Series]:
         """抓加權指數 (TAIEX) 當大盤基準。
 
