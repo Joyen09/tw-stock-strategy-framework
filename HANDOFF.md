@@ -48,15 +48,20 @@ livermore 2萬/2檔（`stockbot-livermore.service` → paper_livermore.json，14
   - 多頭期夏普 0.75（479 筆交易，+10% 停利在大多頭一直放生大魚）、含空頭期 0.26（372 筆）
   - walkforward 反而過關（測試期夏普 1.90、回撤 -1.37%，但只在「選出的5檔金融/大型股」上成立）
   - 結論：法人籌碼跟單只在「籌碼乾淨的認養股」上有效，且防守輸 lynch、進攻輸 livermore，兩頭不到岸
-- 🆕 **策略 A `trust`（投信認養）/ G `floor`（地板股搶反彈）/ P `raiho`（雷浩斯獲利能力矩陣）已實作，待三關驗證**：
+- 📉 **策略 A `trust` / G `floor` / P `raiho` 的 tw50 兩關結果（2026-07-03）**：
+  - trust：兩期皆虧（-8.9%/-10.5%，522/312 筆）→ 跟 mclean 同病：籌碼+均線出場在 tw50 瘋狂進出被手續費磨死
+  - floor：兩期近乎零報酬（0.08%/3.96%）→ tw50 大型股很少跌到自家 P5 極端乖離還爆量，此策略在 tw50 沒舞台
+  - raiho：0 筆交易——**資料正常**（實測 2330 roe=32.5、fcf=2.48兆、pe=33.1 都抓到），是「PE 33 > 18 不夠便宜」
+    → AI 多頭下 tw50 幾乎沒有 A 級+便宜的標的。定位改為**每季跑一次的選股 screener**，不當回測策略
+  - ⚠️ **上述僅證明「在 tw50 上不成立」**：小哥/麥克連類策略的主場是中小型股，用 tw50 測有池子錯配問題（使用者指出，正確）
+- 🆕 **`--universe mid100` 已加（台灣中型100 約略成分股，市值 51~150 名）**，讓籌碼/爆量類策略回主場重測：
   ```bash
-  python main.py compare --strategy trust,floor,raiho,lynch,livermore --source finmind --universe tw50 --start 2023-07-01 --end 2026-07-01 --regime
-  python main.py compare --strategy trust,floor,raiho,lynch,livermore --source finmind --universe tw50 --start 2021-07-01 --end 2024-07-01 --regime
-  python main.py walkforward --strategy trust --source finmind --universe tw50 --regime   # (表現好的才跑)
+  python main.py compare --strategy trust,floor,mclean,lynch,livermore --source finmind --universe mid100 --start 2023-07-01 --end 2026-07-01 --regime
+  python main.py compare --strategy trust,floor,mclean,lynch,livermore --source finmind --universe mid100 --start 2021-07-01 --end 2024-07-01 --regime
   ```
-  - trust：投量比門檻預設 3%（spec 原版 10% 是中小型股設計，tw50 達不到）；「主力同買」條件因分點資料付費而省略
-  - floor：地板線=個股月線乖離歷史 P5 分位（分位只用昨日以前分布算，無前視）＋爆量 2 倍；-4% 緊停損、回月線獲利了結
-  - raiho：⚠️ 基本面是當下快照，回測有前視偏差且「降級出場」不會觸發 → 回測≈選股能力測試，僅供相對比較
+  - 額度：每個期間首跑 ~100 價格 + ~100 籌碼 + TAIEX ≈ 200 請求，兩關分開跑或同小時內剛好塞得下
+  - ⚠️ **生存者偏差**：mid100 是「今天活著」的名單，中小型股此偏差嚴重，回測結果偏樂觀，判讀要打折；
+    就算 mid100 跑贏，也要 walkforward + 空跑再驗，別直接信
 - 🔴 卡付費資料（不做）：B/C/F/H/I/J 要 FinMind 贊助會員的分點資料；N/O 要 TAIFEX 選擇權＋另一套回測引擎
 
 ## 3. 環境與設定
