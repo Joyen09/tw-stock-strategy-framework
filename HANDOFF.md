@@ -48,7 +48,7 @@ livermore 2萬/2檔（`stockbot-livermore.service` → paper_livermore.json，14
   - 多頭期夏普 0.75（479 筆交易，+10% 停利在大多頭一直放生大魚）、含空頭期 0.26（372 筆）
   - walkforward 反而過關（測試期夏普 1.90、回撤 -1.37%，但只在「選出的5檔金融/大型股」上成立）
   - 結論：法人籌碼跟單只在「籌碼乾淨的認養股」上有效，且防守輸 lynch、進攻輸 livermore，兩頭不到岸
-- 🆕 **策略 A `trust`（投信認養）/ G `floor`（地板股搝反彈）/ P `raiho`（雷浩斯獲利能力矩陣）已實作，待三關驗證**：
+- 🆕 **策略 A `trust`（投信認養）/ G `floor`（地板股搶反彈）/ P `raiho`（雷浩斯獲利能力矩陣）已實作，待三關驗證**：
   ```bash
   python main.py compare --strategy trust,floor,raiho,lynch,livermore --source finmind --universe tw50 --start 2023-07-01 --end 2026-07-01 --regime
   python main.py compare --strategy trust,floor,raiho,lynch,livermore --source finmind --universe tw50 --start 2021-07-01 --end 2024-07-01 --regime
