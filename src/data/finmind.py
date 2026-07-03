@@ -149,6 +149,25 @@ class FinMindProvider(DataProvider):
         except Exception as e:
             f.extra["revenue_error"] = str(e)
 
+        # 5) 現金流量表：近四季自由現金流 (營業現金流 - 資本支出)，雷浩斯獲利能力矩陣用
+        try:
+            cf = self._pivot(self.api.taiwan_stock_cash_flows_statement(stock_id=symbol, start_date=start))
+            op = self._col(cf, ["CashProvidedByOperatingActivities",
+                                "NetCashProvidedByUsedInOperatingActivities",
+                                "CashFlowsFromOperatingActivities"])
+            capex = self._col(cf, ["AcquisitionOfPropertyAndPlantAndEquipment",
+                                   "PurchaseOfPropertyPlantAndEquipment",
+                                   "PropertyAndPlantAndEquipment"])
+            if op is not None:
+                op_ttm = float(op.iloc[-4:].sum()) if len(op) >= 4 else float(op.iloc[-1])
+                # 資本支出在現金流量表通常是負數 (流出)；取絕對值相減
+                capex_ttm = 0.0
+                if capex is not None:
+                    capex_ttm = abs(float(capex.iloc[-4:].sum()) if len(capex) >= 4 else float(capex.iloc[-1]))
+                f.fcf = round(op_ttm - capex_ttm, 0)
+        except Exception as e:
+            f.extra["cashflow_error"] = str(e)
+
         return f
 
     def institutional(self, symbol: str, start: str, end: str) -> Optional[pd.DataFrame]:
