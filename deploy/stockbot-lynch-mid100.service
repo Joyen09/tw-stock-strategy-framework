@@ -1,0 +1,31 @@
+# systemd 服務：lynch × 中型100 掃描 (跑一次就退出)，由 stockbot-lynch-mid100.timer 觸發。
+# 依據 2026-07-04 三關驗證：lynch 在 mid100 多頭期夏普 1.57(184%)、含空頭期 1.14、
+# walkforward 測試期 1.31(+24.8%, 回撤-7.5%) —— 唯一三關全過並贏過現任的配置。
+# GARP 的獵場本來就是中小型成長股 (彼得林區本人的玩法)。
+# ⚠️ mid100 回測有生存者偏差，此空跑帳戶就是要用「真實的現在」驗證它。
+# 安裝：
+#   sed "s/YOUR_USER/$(whoami)/g" deploy/stockbot-lynch-mid100.service | sudo tee /etc/systemd/system/stockbot-lynch-mid100.service
+#   sed "s/YOUR_USER/$(whoami)/g" deploy/stockbot-lynch-mid100.timer   | sudo tee /etc/systemd/system/stockbot-lynch-mid100.timer
+#   sudo systemctl daemon-reload && sudo systemctl enable --now stockbot-lynch-mid100.timer
+[Unit]
+Description=Taiwan stock lynch mid-cap scan (run once)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/stock
+EnvironmentFile=-/home/YOUR_USER/stock/.env
+# 獨立帳戶檔 paper_lynch_mid100.json，與現有兩帳戶互不干擾。
+# lynch 是基本面策略：mid100 首掃要抓 100 檔×5 種資料 ≈500 請求，之後財報吃 7 天快取、
+# 每日只剩 ~100 個價格請求。timer 設 15:30 與 14:00/14:20 那組錯開一個滾動小時窗，避免撞額度。
+# --cash 20000 只在首次建檔時生效；重置就刪 paper_lynch_mid100.json。
+ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py scan --strategy lynch --source finmind --universe mid100 --regime --max-positions 2 --budget 10000 --cash 20000 --paper --paper-file paper_lynch_mid100.json --notify
+
+MemoryMax=400M
+CPUQuota=50%
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

@@ -15,11 +15,11 @@ Type=simple
 User=YOUR_USER
 WorkingDirectory=/home/YOUR_USER/stock
 EnvironmentFile=-/home/YOUR_USER/stock/.env
-# --paper：/holdings /sell 對本地持久化模擬盤帳戶。預設同時看兩個策略帳戶
-# (lynch=paper_account.json + livermore=paper_livermore.json)：/holdings 合併顯示
-# 各帳戶持倉+現金+總資產；/sell 自動找到持有那檔的帳戶賣。還沒建檔的帳戶不會顯示。
+# --paper：/holdings /sell 對本地持久化模擬盤帳戶。--paper-file 列出全部策略帳戶：
+# /holdings 合併顯示各帳戶持倉+現金+總資產；/sell 自動找到持有那檔的帳戶賣。
+# 還沒建檔的帳戶不會顯示，先列上無妨。
 # 若 scan 用 Shioaji 模擬盤/實單 (B/C 模式)，就把 --paper 拿掉，改對券商帳戶。
-ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py listen --paper
+ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py listen --paper --paper-file "lynch=paper_account.json,livermore=paper_livermore.json,lynch-mid100=paper_lynch_mid100.json"
 Restart=always
 RestartSec=10
 MemoryMax=200M

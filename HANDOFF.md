@@ -54,14 +54,17 @@ livermore 2萬/2檔（`stockbot-livermore.service` → paper_livermore.json，14
   - raiho：0 筆交易——**資料正常**（實測 2330 roe=32.5、fcf=2.48兆、pe=33.1 都抓到），是「PE 33 > 18 不夠便宜」
     → AI 多頭下 tw50 幾乎沒有 A 級+便宜的標的。定位改為**每季跑一次的選股 screener**，不當回測策略
   - ⚠️ **上述僅證明「在 tw50 上不成立」**：小哥/麥克連類策略的主場是中小型股，用 tw50 測有池子錯配問題（使用者指出，正確）
-- 🆕 **`--universe mid100` 已加（台灣中型100 約略成分股，市值 51~150 名）**，讓籌碼/爆量類策略回主場重測：
-  ```bash
-  python main.py compare --strategy trust,floor,mclean,lynch,livermore --source finmind --universe mid100 --start 2023-07-01 --end 2026-07-01 --regime
-  python main.py compare --strategy trust,floor,mclean,lynch,livermore --source finmind --universe mid100 --start 2021-07-01 --end 2024-07-01 --regime
-  ```
-  - 額度：每個期間首跑 ~100 價格 + ~100 籌碼 + TAIEX ≈ 200 請求，兩關分開跑或同小時內剛好塞得下
-  - ⚠️ **生存者偏差**：mid100 是「今天活著」的名單，中小型股此偏差嚴重，回測結果偏樂觀，判讀要打折；
-    就算 mid100 跑贏，也要 walkforward + 空跑再驗，別直接信
+- 🏁 **mid100 主場重測結果（2026-07-04）——籌碼流派正式蓋棺，但挖到寶**：
+  - trust 主場更慘（多頭 -29.3%！）、floor 多頭 -7.4%/空頭期 +12.3% 仍遠不及格、
+    mclean 主場進步（夏普 1.03/0.88）但仍墊底 → **小哥/麥克連籌碼流派在對的池子也輸，正式淘汰**
+    （且 mid100 自帶生存者偏差順風，真實只會更差）
+  - 💎 **lynch × mid100 三關全過**：多頭夏普 1.57（184%）、含空頭期 1.14（61.6%）、
+    **walkforward 測試期 +24.8%/夏普 1.31/回撤 -7.5%** —— 唯一贏過現任的挑戰者。
+    合理：GARP 的獵場本來就是中小型成長股（彼得林區本人的玩法），tw50 沒便宜的成長股
+  - → **已加第三個空跑帳戶驗證它**（見下），生存者偏差的最終裁判是空跑
+- 🆕 **第三帳戶 lynch×mid100 已部署**：`stockbot-lynch-mid100.service/.timer`（**15:30**，
+  與 14:00/14:20 錯開一個滾動小時窗——mid100 首掃/財報過期日 ~500 請求會撞額度）→
+  paper_lynch_mid100.json，2萬/2檔。listener 的 --paper-file 已列三帳戶。
 - 🔴 卡付費資料（不做）：B/C/F/H/I/J 要 FinMind 贊助會員的分點資料；N/O 要 TAIFEX 選擇權＋另一套回測引擎
 
 ## 3. 環境與設定
