@@ -1,0 +1,14 @@
+# systemd 計時器：lynch × 中型100，每交易日 15:30 跑一次。
+# 為什麼是 15:30 而不是跟著 14:00/14:20：FinMind 免費額度是「滾動 60 分鐘窗口 600 請求」，
+# mid100 首掃/財報過期日要 ~500 請求，跟 14:00 那組擠同一個小時窗會爆；
+# 15:30 時 14:00-14:25 的請求已老化出窗，乾淨。收盤價 13:30 就定案，晚點掃結果相同。
+# 安裝見 stockbot-lynch-mid100.service 開頭註解。
+[Unit]
+Description=Run lynch mid-cap scan once per trading day after close
+
+[Timer]
+OnCalendar=Mon-Fri 15:30
+Persistent=false
+
+[Install]
+WantedBy=timers.target
