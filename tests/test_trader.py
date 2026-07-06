@@ -128,7 +128,7 @@ def test_regime_filter_allows_buys_in_bull_market():
 
 
 def test_max_order_value_rejects_oversized_buy():
-    # 保險絲：單筆買單金額超過上限就拒單 (防 sizing/報價/髒資料把金額放大)
+    # 保險絲：單筆買單金額超過上限就拒單 (防 sizing/報價/髊資料把金額放大)
     provider = FakeProvider(price=600.0)
     strat = FakeStrategy({"2330": (Action.BUY, 1.0)})
     trader = LiveTrader(
@@ -166,3 +166,42 @@ def test_paused_blocks_buys_but_allows_sells():
     plans = trader.scan(["AAA", "BBB"], end="2026-06-30")
     actions = {p.symbol: p.action for p in plans}
     assert actions == {"BBB": "SELL"}  # 只出場，不買 AAA
+
+
+class _FakeNotifier:
+    enabled = True
+
+    def __init__(self):
+        self.sent = []
+
+    def send(self, msg):
+        self.sent.append(msg)
+        return True
+
+
+def test_heartbeat_sent_when_no_signals():
+    """無訊號時要推心跳（證明有跑），且含現金/持倉/狀態。"""
+    from src.broker.paper import PaperBroker
+
+    notifier = _FakeNotifier()
+    t = LiveTrader(FakeProvider(), PaperBroker(cash=50_000),
+                   FakeStrategy({}),  # 全 HOLD -> 無訊號
+                   position_budget=10_000, dry_run=True, notifier=notifier)
+    t.scan(["2330"], "2026-07-06")
+    assert len(notifier.sent) == 1
+    assert "掃描完成" in notifier.sent[0]
+    assert "50,000" in notifier.sent[0]
+    assert "運作正常" in notifier.sent[0]
+
+
+def test_heartbeat_shows_paused_state():
+    """暫停中要在心跳裡標示 ⏸——避免 /pause 忘了解除卻無從察覺。"""
+    from src.broker.paper import PaperBroker
+
+    notifier = _FakeNotifier()
+    t = LiveTrader(FakeProvider(), PaperBroker(cash=50_000),
+                   FakeStrategy({}),
+                   position_budget=10_000, dry_run=True, notifier=notifier, paused=True)
+    t.scan(["2330"], "2026-07-06")
+    assert len(notifier.sent) == 1
+    assert "暫停買進中" in notifier.sent[0]
