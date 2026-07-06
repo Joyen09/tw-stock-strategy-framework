@@ -187,9 +187,16 @@ class LiveTrader:
         return plan.sent
 
     def _notify(self, plans: List[TradePlan], end: str) -> bool:
-        """有訊號就推 Telegram；無訊號不推，避免洗版。回傳是否成功送出。"""
-        if not plans or self.notifier is None or not getattr(self.notifier, "enabled", False):
+        """有訊號推交易明細；無訊號推一行「心跳」。回傳是否成功送出。
+
+        心跳的目的：讓「沒訊號」和「系統掛了/被暫停」看得出差別——每天固定時間
+        該出現的訊息沒出現 = 該去查 journalctl；訊息裡也會標出 ⏸ 暫停狀態
+        （曾發生 /pause 忘了解除、空跑一週買不了東西卻無從察覺的事故）。
+        """
+        if self.notifier is None or not getattr(self.notifier, "enabled", False):
             return False
+        if not plans:
+            return self._heartbeat(end)
         import html
 
         mode = "✅ 已下單" if not self.dry_run else "🧪 模擬(未下單)"
@@ -200,3 +207,16 @@ class LiveTrader:
             reason = html.escape(p.reason)
             lines.append(f"{emoji} <b>{html.escape(p.symbol)}</b> {p.shares}股 @ {p.price:.2f}\n　{reason}")
         return self.notifier.send("\n".join(lines))
+
+    def _heartbeat(self, end: str) -> bool:
+        """無訊號時的一行心跳：證明掃描有跑完，並揭露暫停狀態/持倉/現金。"""
+        held = len([p for p in self.broker.positions() if p.shares > 0])
+        try:
+            cash = f"{self.broker.cash():,.0f}"
+        except Exception:
+            cash = "?"
+        state = "⏸ 暫停買進中" if self.paused else "運作正常"
+        return self.notifier.send(
+            f"🫀 {self.strategy.name} 掃描完成 ({end})：無交易訊號｜"
+            f"持倉 {held} 檔｜現金 {cash}｜{state}"
+        )
