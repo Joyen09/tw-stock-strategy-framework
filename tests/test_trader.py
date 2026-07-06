@@ -128,7 +128,7 @@ def test_regime_filter_allows_buys_in_bull_market():
 
 
 def test_max_order_value_rejects_oversized_buy():
-    # 保險絲：單筆買單金額超過上限就拒單 (防 sizing/報價/髊資料把金額放大)
+    # 保險絲：單筆買單金額超過上限就拒單 (防 sizing/報價/髒資料把金額放大)
     provider = FakeProvider(price=600.0)
     strat = FakeStrategy({"2330": (Action.BUY, 1.0)})
     trader = LiveTrader(
