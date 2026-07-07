@@ -1,0 +1,26 @@
+# systemd 服務：常駐 Discord bot 雙向控制（取代被凍結的 Telegram listener）。
+# 前置：.env 要有 DISCORD_BOT_TOKEN / DISCORD_CHANNEL_ID（設定步驟見 src/control_discord.py），
+#       並 pip install -U discord.py（在 .venv 裡裝）。
+# 安裝：
+#   sed "s/YOUR_USER/$(whoami)/g" deploy/stockbot-discord-listen.service | sudo tee /etc/systemd/system/stockbot-discord-listen.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now stockbot-discord-listen.service
+#   sudo systemctl disable --now stockbot-listen.service     # 舊的 Telegram listener 停掉
+#   journalctl -u stockbot-discord-listen.service -f          # 看即時 log
+[Unit]
+Description=Taiwan stock bot - Discord command listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/stock
+EnvironmentFile=-/home/YOUR_USER/stock/.env
+# /holdings /sell 對三個本地模擬盤帳戶（合併顯示+自動路由，與 Telegram 版行為相同）
+ExecStart=/home/YOUR_USER/stock/.venv/bin/python discord_listen.py --paper --paper-file "lynch=paper_account.json,livermore=paper_livermore.json,lynch-mid100=paper_lynch_mid100.json"
+Restart=always
+RestartSec=10
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target

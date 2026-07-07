@@ -13,3 +13,6 @@ shioaji>=1.2
 
 # 測試 (選用)
 pytest>=7.0
+
+# Discord 雙向控制 (選用) — discord_listen.py 用；推播用 webhook 不需要這個
+discord.py>=2.3
