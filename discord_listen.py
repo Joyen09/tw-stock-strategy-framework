@@ -12,6 +12,24 @@ import argparse
 import os
 
 
+def _load_dotenv(root: str):
+    """手動執行時載入專案根目錄的 .env（不覆蓋已 export 的環境變數）。
+    systemd 走 EnvironmentFile 載入，這裡是給手動 `python discord_listen.py` 用。"""
+    path = os.path.join(root, ".env")
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+
+
 def _parse_paper_specs(arg: str, root: str):
     """'標籤=檔名,標籤=檔名' → [(標籤, 絕對路徑), ...]；單一項回傳純路徑（沿用舊行為）。"""
     specs = []
@@ -40,6 +58,7 @@ def main():
     args = ap.parse_args()
 
     root = os.path.dirname(os.path.abspath(__file__))
+    _load_dotenv(root)  # 手動執行時把 .env 讀進環境變數（DISCORD_BOT_TOKEN 等）
     paper_path = _parse_paper_specs(args.paper_file, root)
 
     from src.control_discord import run_bot
