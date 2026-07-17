@@ -43,7 +43,7 @@ class MultiPaperBroker:
 
     def total_equity(self) -> float:
         """總資產 (現金 + 持倉成本計價；listener 沒有即時報價，用均價估)。
-        只計入已建檔的帳戶，避免把「還沒開始跑的帳戶」的初始資金灸水進來。"""
+        只計入已建檔的帳戶，避免把「還沒開始跑的帳戶」的初始資金灌水進來。"""
         total = 0.0
         for _, ps, cash, exists in self.holdings_by_account():
             if not exists:
@@ -54,7 +54,7 @@ class MultiPaperBroker:
     def report(self, price_fn) -> List[dict]:
         """對每個已建檔帳戶做市值計算，回傳績效清單（給 /report 用）。
 
-        price_fn(symbol) -> 最新收盤價，或 None（抓不到時退回用成本價，不灸水）。
+        price_fn(symbol) -> 最新收盤價，或 None（抓不到時退回用成本價，不灌水）。
         每筆：label / initial（初始資金）/ cash / mtm（市值總資產）/
               ret（總報酬率）/ unreal（未實現損益）/ positions（明細 dict list）。
         """
