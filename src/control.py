@@ -180,7 +180,7 @@ def _handle_multi_paper(cmd: str, arg, broker) -> str:
 
 def _latest_price_fn():
     """回傳 price_fn(symbol)->最新收盤價 或 None。用磁碟快取的 FinMind，
-    同日重查 0 請求；抓不到（無 token/停牌）回 None，report 會退回用成本價（不灸水）。"""
+    同日重查 0 請求；抓不到（無 token/停牌）回 None，report 會退回用成本價（不灌水）。"""
     try:
         from src.data.finmind import FinMindProvider
         from src.data.cache import DiskCachingProvider
@@ -243,7 +243,7 @@ def _format_report(rows) -> str:
     lines.append(f"━━━━━━━━━━")
     lines.append(f"💰 三帳戶合計 {tsign} {tot_ret:+.2%}（市值 {tot_mtm:,.0f} / 初始 {tot_init:,.0f}）")
     if any_estimated:
-        lines.append("⚠標記者抓不到最新價，暗用成本價（顯示 0 損益）")
+        lines.append("⚠標記者抓不到最新價，暫用成本價（顯示 0 損益）")
     return "\n".join(lines)
 
 
