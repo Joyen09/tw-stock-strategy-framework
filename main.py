@@ -436,6 +436,28 @@ def cmd_listen(args):
         print("\n已停止監聽。")
 
 
+def cmd_report(args):
+    """模擬盤績效報告：用最新收盤價把各帳戶市值化，算報酬率/未實現損益（免監聽也能看）。"""
+    from src.control import handle_broker_command, _try_broker
+
+    root = os.path.dirname(os.path.abspath(__file__))
+    specs = []
+    for item in args.paper_file.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "=" in item:
+            label, fname = item.split("=", 1)
+        else:
+            label = os.path.splitext(os.path.basename(item))[0].removeprefix("paper_")
+            fname = item
+        specs.append((label.strip(), os.path.join(root, fname.strip())))
+    paper_path = specs if len(specs) > 1 else (specs[0][1] if specs else None)
+
+    broker = _try_broker(simulation=True, paper=True, paper_path=paper_path)
+    print(handle_broker_command("report", broker))
+
+
 def cmd_notify_test(args):
     from src.notify import TelegramNotifier
     n = TelegramNotifier()
@@ -600,6 +622,13 @@ def build_parser():
                     help="模擬盤帳戶，逗號分隔可多個、可帶標籤 (標籤=檔名)。"
                          "/holdings 合併顯示所有帳戶，/sell 自動路由")
     ls.set_defaults(func=cmd_listen)
+
+    rp = sub.add_parser("report", help="模擬盤績效報告 (市值計，含報酬率/未實現損益)")
+    rp.add_argument("--paper-file",
+                    default="lynch=paper_account.json,livermore=paper_livermore.json,lynch-mid100=paper_lynch_mid100.json",
+                    help="模擬盤帳戶，逗號分隔可多個、可帶標籤 (標籤=檔名)")
+    rp.set_defaults(func=cmd_report)
+
     sub.add_parser("notify-test", help="送一則 Telegram 測試訊息").set_defaults(func=cmd_notify_test)
     sub.add_parser("notify-chatid", help="查詢自己的 Telegram chat_id").set_defaults(func=cmd_notify_chatid)
 
