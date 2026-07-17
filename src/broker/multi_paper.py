@@ -43,13 +43,49 @@ class MultiPaperBroker:
 
     def total_equity(self) -> float:
         """總資產 (現金 + 持倉成本計價；listener 沒有即時報價，用均價估)。
-        只計入已建檔的帳戶，避免把「還沒開始跑的帳戶」的初始資金灌水進來。"""
+        只計入已建檔的帳戶，避免把「還沒開始跑的帳戶」的初始資金灸水進來。"""
         total = 0.0
         for _, ps, cash, exists in self.holdings_by_account():
             if not exists:
                 continue
             total += cash + sum(p.shares * p.avg_price for p in ps)
         return total
+
+    def report(self, price_fn) -> List[dict]:
+        """對每個已建檔帳戶做市值計算，回傳績效清單（給 /report 用）。
+
+        price_fn(symbol) -> 最新收盤價，或 None（抓不到時退回用成本價，不灸水）。
+        每筆：label / initial（初始資金）/ cash / mtm（市值總資產）/
+              ret（總報酬率）/ unreal（未實現損益）/ positions（明細 dict list）。
+        """
+        out = []
+        for label, b in self.brokers.items():
+            if not os.path.exists(b.path):
+                continue  # 還沒開始跑的帳戶不列
+            ps = [p for p in b.positions() if p.shares > 0]
+            initial = float(getattr(b, "initial_cash", b.cash()))
+            cash = b.cash()
+            mkt = 0.0
+            details = []
+            for p in ps:
+                px = price_fn(p.symbol)
+                priced = px is not None and px > 0
+                last = px if priced else p.avg_price
+                value = p.shares * last
+                mkt += value
+                details.append({
+                    "symbol": p.symbol, "shares": p.shares, "avg": p.avg_price,
+                    "last": last, "priced": priced,
+                    "pnl": p.shares * (last - p.avg_price),
+                })
+            mtm = cash + mkt
+            unreal = sum(d["pnl"] for d in details)
+            ret = (mtm / initial - 1) if initial > 0 else 0.0
+            out.append({
+                "label": label, "initial": initial, "cash": cash, "mtm": mtm,
+                "ret": ret, "unreal": unreal, "positions": details,
+            })
+        return out
 
     # --- 賣出路由 ---
 
