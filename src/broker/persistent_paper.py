@@ -29,6 +29,8 @@ class PersistentPaperBroker(PaperBroker):
         self._load()  # 檔案存在就覆蓋掉初始 cash/持倉 (延續上次狀態)
 
     def _load(self) -> None:
+        # 初始資金：算報酬率要用。新帳戶=建構子 cash；舊檔沒存過就回填估計值。
+        self.initial_cash = self.account.cash
         if not os.path.exists(self.path):
             return  # 首次執行：用建構子的初始 cash、空持倉
         try:
@@ -44,9 +46,17 @@ class PersistentPaperBroker(PaperBroker):
             self.account.positions[sym] = Position(
                 symbol=sym, shares=int(p["shares"]), avg_price=float(p["avg_price"])
             )
+        if "initial_cash" in data:
+            self.initial_cash = float(data["initial_cash"])
+        else:
+            # 舊檔沒存過初始資金：用「現金 + 持倉成本」回填 (≈ 初始 - 已付手續費，誤差 <0.5%)，
+            # 之後 _save 會把它寫進檔案固定下來。
+            cost = sum(p.shares * p.avg_price for p in self.account.positions.values())
+            self.initial_cash = self.account.cash + cost
 
     def _save(self) -> None:
         data = {
+            "initial_cash": getattr(self, "initial_cash", self.account.cash),
             "cash": self.account.cash,
             "positions": [
                 {"symbol": p.symbol, "shares": p.shares, "avg_price": p.avg_price}

@@ -83,14 +83,15 @@ def apply_command(text: str, cfg: dict) -> Tuple[str, dict]:
         return f"📊 目前設定\n單檔預算：{b}\n最多檔數：{m}\n狀態：{p}", cfg
     if cmd in ("help", "start"):
         return ("可用指令：\n/budget 60000\n/maxpos 5\n/pause\n/resume\n/status\n"
-                "/holdings（看持倉，需API）\n/sell 2330 或 /sell all（手動賣，需API）", cfg)
+                "/holdings（看持倉，成本計）\n/report（看績效，市值計含報酬率）\n"
+                "/sell 2330 或 /sell all（手動賣）", cfg)
     return "", cfg  # 不認得的訊息不回（避免洗版）
 
 
 # --- 需要券商連線的指令 (/holdings, /sell)；apply_command 只處理設定類 ---
 def is_broker_command(text: str) -> bool:
     parts = (text or "").strip().lstrip("/").split()
-    return bool(parts) and parts[0].lower() in ("holdings", "positions", "sell")
+    return bool(parts) and parts[0].lower() in ("holdings", "positions", "sell", "report", "pnl")
 
 
 def handle_broker_command(text: str, broker) -> str:
@@ -171,7 +172,79 @@ def _handle_multi_paper(cmd: str, arg, broker) -> str:
         return "🔴 已送出賣單：\n　" + "\n　".join(
             f"[{label}] {sym} {shares} 股" for label, sym, shares in done)
 
+    if cmd in ("report", "pnl"):
+        return _format_report(broker.report(_latest_price_fn()))
+
     return ""
+
+
+def _latest_price_fn():
+    """回傳 price_fn(symbol)->最新收盤價 或 None。用磁碟快取的 FinMind，
+    同日重查 0 請求；抓不到（無 token/停牌）回 None，report 會退回用成本價（不灌水）。"""
+    try:
+        from src.data.finmind import FinMindProvider
+        from src.data.cache import DiskCachingProvider
+    except Exception:
+        return lambda sym: None
+    try:
+        provider = DiskCachingProvider(FinMindProvider())
+    except Exception:
+        return lambda sym: None
+    # 用「今天」當 end；start 取近兩週足夠抓到最後一個交易日收盤
+    end = _today_str()
+    start = _days_ago_str(14)
+
+    def _price(sym: str):
+        try:
+            df = provider.history(sym, start, end)
+            if df is None or df.empty:
+                return None
+            return float(df["close"].iloc[-1])
+        except Exception:
+            return None
+
+    return _price
+
+
+def _today_str() -> str:
+    import datetime as _dt
+    return _dt.date.today().isoformat()
+
+
+def _days_ago_str(n: int) -> str:
+    import datetime as _dt
+    return (_dt.date.today() - _dt.timedelta(days=n)).isoformat()
+
+
+def _format_report(rows) -> str:
+    """把 MultiPaperBroker.report() 的結果排成一則績效訊息。"""
+    if not rows:
+        return "📭 尚無已建檔的模擬帳戶，還沒有績效可看。"
+    lines = ["📊 模擬盤績效（市值計，最新收盤價）："]
+    tot_init = tot_mtm = 0.0
+    any_estimated = False
+    for r in rows:
+        tot_init += r["initial"]
+        tot_mtm += r["mtm"]
+        sign = "🟢" if r["ret"] >= 0 else "🔴"
+        lines.append(f"【{r['label']}】{sign} 報酬 {r['ret']:+.2%}"
+                     f"（市值 {r['mtm']:,.0f} / 初始 {r['initial']:,.0f}）")
+        for d in r["positions"]:
+            mark = "" if d["priced"] else "⚠成本價"
+            lines.append(f"　{d['symbol']} {d['shares']}股：{d['pnl']:+,.0f} 元 "
+                         f"(現 {d['last']:.1f} / 成本 {d['avg']:.1f}){mark}")
+            if not d["priced"]:
+                any_estimated = True
+        if not r["positions"]:
+            lines.append("　(無持倉，全現金)")
+        lines.append(f"　現金 {r['cash']:,.0f}｜未實現損益 {r['unreal']:+,.0f}")
+    tot_ret = (tot_mtm / tot_init - 1) if tot_init > 0 else 0.0
+    tsign = "🟢" if tot_ret >= 0 else "🔴"
+    lines.append(f"━━━━━━━━━━")
+    lines.append(f"💰 三帳戶合計 {tsign} {tot_ret:+.2%}（市值 {tot_mtm:,.0f} / 初始 {tot_init:,.0f}）")
+    if any_estimated:
+        lines.append("⚠標記者抓不到最新價，暫用成本價（顯示 0 損益）")
+    return "\n".join(lines)
 
 
 def _try_broker(simulation: bool = True, paper: bool = False, paper_path=None):
