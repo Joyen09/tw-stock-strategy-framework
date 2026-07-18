@@ -180,7 +180,7 @@ def _handle_multi_paper(cmd: str, arg, broker) -> str:
 
 def _latest_price_fn():
     """回傳 price_fn(symbol)->最新收盤價 或 None。用磁碟快取的 FinMind，
-    同日重查 0 請求；抓不到（無 token/停牌）回 None，report 會退回用成本價（不灸水）。"""
+    同日重查 0 請求；抓不到（無 token/停牌）回 None，report 會退回用成本價（不灌水）。"""
     try:
         from src.data.finmind import FinMindProvider
         from src.data.cache import DiskCachingProvider
@@ -271,7 +271,7 @@ def _format_report(rows) -> str:
             vs = "🟢 領先大盤" if diff >= 0 else "🔴 落後大盤"
             lines.append(f"📈 同期大盤 (TAIEX) {bench:+.2%}｜{vs} {diff:+.2%}")
     if any_estimated:
-        lines.append("⚠標記者抓不到最新價，暗用成本價（顯示 0 損益）".replace("暗", "暫"))
+        lines.append("⚠標記者抓不到最新價，暫用成本價（顯示 0 損益）")
     lines.append("ℹ️ 空跑未滿一個月，數字仍多為市場波動、參考即可；重點看長期與回撤。")
     return "\n".join(lines)
 
