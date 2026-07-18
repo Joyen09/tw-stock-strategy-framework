@@ -34,19 +34,45 @@ from .control import (
 )
 
 
+_KNOWN_CMDS = {"budget", "maxpos", "maxpositions", "pause", "resume", "status",
+               "help", "start", "holdings", "positions", "sell", "report", "pnl"}
+
+
 def process_command(text: str, broker) -> str:
-    """處理一行指令，回傳回覆文字（空字串=不回）。與 Telegram listener 同一套大腦。"""
-    text = (text or "").strip()
-    if text.startswith("!"):  # Discord 打 / 會觸發斜線指令選單，支援 ! 當替代前綴
-        text = "/" + text[1:]
-    if not text.startswith("/"):
-        return ""  # 只理指令；一般聊天不回，避免吵
-    if is_broker_command(text):
-        return handle_broker_command(text, broker)
-    reply, cfg = apply_command(text, load_runtime())
-    if reply:
-        save_runtime(cfg)
-    return reply
+    """處理一行指令，回傳回覆文字（空字串=不回）。與 Telegram listener 同一套大腦。
+
+    穩健性：整段包 try/except——指令出錯回一行錯誤訊息而不是靜默無回應
+    （靜默最難除錯：分不清是「沒收到」「不認得」還是「壞了」）。
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    # 前綴正規化：! 或 / 皆可，且容忍前綴後有空白（"! report" == "/report"）。
+    if raw[0] in "!/":
+        body = raw[1:].strip()
+        if not body:
+            return ""
+        cmd_word = body.split()[0].lower()
+        norm = "/" + body
+    else:
+        return ""  # 沒前綴＝一般聊天，不回避免吵
+
+    try:
+        if cmd_word not in _KNOWN_CMDS:
+            return (f"❓ 不認得指令「{cmd_word}」。\n"
+                    "可用：/status /report /holdings /pause /resume "
+                    "/budget N /maxpos N /sell 2330｜傳 /help 看說明。\n"
+                    "（若剛更新過程式，記得 sudo systemctl restart stockbot-discord-listen）")
+        if is_broker_command(norm):
+            return handle_broker_command(norm, broker)
+        reply, cfg = apply_command(norm, load_runtime())
+        if reply:
+            save_runtime(cfg)
+        return reply
+    except Exception as e:  # 絕不靜默：把錯誤丟回頻道，方便手機上就看到問題
+        import traceback
+        traceback.print_exc()
+        return f"⚠️ 指令「{cmd_word}」執行出錯：{type(e).__name__}: {e}"
 
 
 def run_bot(simulation: bool = True, paper: bool = False, paper_path=None):

@@ -1,0 +1,12 @@
+# systemd 計時器：每週五 14:30 推一次績效報告 (三個 scan 都跑完後)。
+# 收盤 13:30、scan 14:00-15:30，週五整週結算完推一次剛好。
+# 安裝見 stockbot-report.service 開頭註解。
+[Unit]
+Description=Run weekly paper-trading performance report (Fri after close)
+
+[Timer]
+OnCalendar=Fri 14:30
+Persistent=false
+
+[Install]
+WantedBy=timers.target
