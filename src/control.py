@@ -216,6 +216,24 @@ def _days_ago_str(n: int) -> str:
     return (_dt.date.today() - _dt.timedelta(days=n)).isoformat()
 
 
+def _taiex_return_since(start_date: str):
+    """大盤 (TAIEX) 從 start_date 到今天的報酬率；抓不到回 None。
+    用磁碟快取的 FinMind benchmark（含 15s timeout / 逾時回 None），同日重查 0 請求。"""
+    if not start_date:
+        return None
+    try:
+        from src.data.finmind import FinMindProvider
+        from src.data.cache import DiskCachingProvider
+        provider = DiskCachingProvider(FinMindProvider())
+        s = provider.benchmark(start_date, _today_str())
+        if s is None or len(s) < 2:
+            return None
+        first, last = float(s.iloc[0]), float(s.iloc[-1])
+        return (last / first - 1) if first > 0 else None
+    except Exception:
+        return None
+
+
 def _format_report(rows) -> str:
     """把 MultiPaperBroker.report() 的結果排成一則績效訊息。"""
     if not rows:
@@ -239,11 +257,22 @@ def _format_report(rows) -> str:
             lines.append("　(無持倉，全現金)")
         lines.append(f"　現金 {r['cash']:,.0f}｜未實現損益 {r['unreal']:+,.0f}")
     tot_ret = (tot_mtm / tot_init - 1) if tot_init > 0 else 0.0
+    tot_unreal = tot_mtm - tot_init
     tsign = "🟢" if tot_ret >= 0 else "🔴"
     lines.append(f"━━━━━━━━━━")
-    lines.append(f"💰 三帳戶合計 {tsign} {tot_ret:+.2%}（市值 {tot_mtm:,.0f} / 初始 {tot_init:,.0f}）")
+    lines.append(f"💰 三帳戶合計 {tsign} {tot_ret:+.2%}"
+                 f"（市值 {tot_mtm:,.0f} / 初始 {tot_init:,.0f}｜損益 {tot_unreal:+,.0f}）")
+    # 大盤對照：贏過大盤才是真本事（分開「市場漲跌」與「策略優劣」）。用最早的起算日對齊。
+    starts = [r["start_date"] for r in rows if r.get("start_date")]
+    if starts:
+        bench = _taiex_return_since(min(starts))
+        if bench is not None:
+            diff = tot_ret - bench
+            vs = "🟢 領先大盤" if diff >= 0 else "🔴 落後大盤"
+            lines.append(f"📈 同期大盤 (TAIEX) {bench:+.2%}｜{vs} {diff:+.2%}")
     if any_estimated:
         lines.append("⚠標記者抓不到最新價，暫用成本價（顯示 0 損益）")
+    lines.append("ℹ️ 空跑未滿一個月，數字仍多為市場波動、參考即可；重點看長期與回撤。")
     return "\n".join(lines)
 
 

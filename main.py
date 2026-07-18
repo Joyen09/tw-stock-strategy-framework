@@ -455,7 +455,16 @@ def cmd_report(args):
     paper_path = specs if len(specs) > 1 else (specs[0][1] if specs else None)
 
     broker = _try_broker(simulation=True, paper=True, paper_path=paper_path)
-    print(handle_broker_command("report", broker))
+    report = handle_broker_command("report", broker)
+    print(report)
+    if getattr(args, "notify", False):
+        from src.notify import TelegramNotifier  # 向後相容工廠：回多通道 (Telegram+Discord)
+        n = TelegramNotifier()
+        if n.enabled and report:
+            n.send("📅 <b>每週績效報告</b>\n" + report)
+            print("（已推送績效報告到通知頻道）")
+        else:
+            print("（未設定通知通道，略過推播）")
 
 
 def cmd_notify_test(args):
@@ -627,6 +636,7 @@ def build_parser():
     rp.add_argument("--paper-file",
                     default="lynch=paper_account.json,livermore=paper_livermore.json,lynch-mid100=paper_lynch_mid100.json",
                     help="模擬盤帳戶，逗號分隔可多個、可帶標籤 (標籤=檔名)")
+    rp.add_argument("--notify", action="store_true", help="把績效報告推到通知頻道 (Discord/Telegram)")
     rp.set_defaults(func=cmd_report)
 
     sub.add_parser("notify-test", help="送一則 Telegram 測試訊息").set_defaults(func=cmd_notify_test)

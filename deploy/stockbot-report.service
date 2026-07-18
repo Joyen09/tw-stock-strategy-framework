@@ -1,0 +1,24 @@
+# systemd 服務：每週推一次模擬盤績效報告到 Discord/Telegram (跑一次就退出)。
+# 由 stockbot-report.timer 每週五收盤後觸發，讓你不必手動傳 !report。
+# 安裝：
+#   sed "s/YOUR_USER/$(whoami)/g" deploy/stockbot-report.service | sudo tee /etc/systemd/system/stockbot-report.service
+#   sed "s/YOUR_USER/$(whoami)/g" deploy/stockbot-report.timer   | sudo tee /etc/systemd/system/stockbot-report.timer
+#   sudo systemctl daemon-reload && sudo systemctl enable --now stockbot-report.timer
+[Unit]
+Description=Taiwan stock weekly paper-trading performance report
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/stock
+EnvironmentFile=-/home/YOUR_USER/stock/.env
+# 用市值計算三帳戶績效並推到通知頻道 (DISCORD_WEBHOOK_URL / Telegram)。
+ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py report --paper-file "lynch=paper_account.json,livermore=paper_livermore.json,lynch-mid100=paper_lynch_mid100.json" --notify
+
+MemoryMax=300M
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

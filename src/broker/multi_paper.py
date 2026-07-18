@@ -84,6 +84,7 @@ class MultiPaperBroker:
             out.append({
                 "label": label, "initial": initial, "cash": cash, "mtm": mtm,
                 "ret": ret, "unreal": unreal, "positions": details,
+                "start_date": getattr(b, "start_date", None),
             })
         return out
 

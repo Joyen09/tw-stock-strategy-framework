@@ -27,10 +27,44 @@ def test_bang_prefix_works_like_slash(tmp_path, monkeypatch):
     assert r_bang == r_slash
 
 
+def test_prefix_tolerates_trailing_space(tmp_path):
+    # "! report" (前綴後有空白) 要跟 "!report" 一樣可用
+    a = process_command("!report", _broker(tmp_path))
+    b = process_command("! report", _broker(tmp_path))
+    assert "模擬盤績效" in a
+    assert a == b
+
+
+def test_unknown_command_gives_hint(tmp_path):
+    r = process_command("!reprot", _broker(tmp_path))  # 打錯字
+    assert "不認得指令" in r
+    assert "reprot" in r
+
+
+def test_error_is_surfaced_not_silent(tmp_path):
+    # broker 的 report 丟例外時，要回一行錯誤訊息而非靜默
+    class _Boom:
+        brokers = {"x": None}
+
+        def reload(self):
+            pass
+
+        def report(self, fn):
+            raise RuntimeError("boom")
+
+    r = process_command("!report", _Boom())
+    assert "執行出錯" in r and "boom" in r
+
+
 def test_holdings_via_discord(tmp_path):
     reply = process_command("/holdings", _broker(tmp_path))
     assert "2330 10 股" in reply
     assert "總資產" in reply
+
+
+def test_report_via_discord_marks_to_market(tmp_path):
+    reply = process_command("!report", _broker(tmp_path))
+    assert "模擬盤績效" in reply
 
 
 def test_pause_resume_roundtrip(tmp_path, monkeypatch):

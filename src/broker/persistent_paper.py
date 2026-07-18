@@ -26,11 +26,19 @@ class PersistentPaperBroker(PaperBroker):
     def __init__(self, path: str, cash: float = 50_000.0, fee_discount: float = 1.0):
         super().__init__(cash=cash, fee_discount=fee_discount)
         self.path = path
+        is_new = not os.path.exists(path)
         self._load()  # 檔案存在就覆蓋掉初始 cash/持倉 (延續上次狀態)
+        if is_new:
+            # 全新帳戶：記下建立日=起算日 (report 的大盤對照要對齊這個窗口)。
+            # 只設在記憶體、不立即建檔——保留「首單前不建檔、不列入 /holdings」的行為；
+            # start_date 會在第一次下單 (_save) 時一起落地。
+            import datetime as _dt
+            self.start_date = _dt.date.today().isoformat()
 
     def _load(self) -> None:
         # 初始資金：算報酬率要用。新帳戶=建構子 cash；舊檔沒存過就回填估計值。
         self.initial_cash = self.account.cash
+        self.start_date = None  # 帳戶起算日 (算「同期大盤報酬」對照用)；舊檔沒存就下次存檔補今天
         if not os.path.exists(self.path):
             return  # 首次執行：用建構子的初始 cash、空持倉
         try:
@@ -53,10 +61,14 @@ class PersistentPaperBroker(PaperBroker):
             # 之後 _save 會把它寫進檔案固定下來。
             cost = sum(p.shares * p.avg_price for p in self.account.positions.values())
             self.initial_cash = self.account.cash + cost
+        # start_date 只在「全新帳戶建立時」由 __init__ 設定 (=真正起算日)；
+        # 舊帳戶檔沒存過就維持 None，report 不硬湊大盤對照 (窗口對不齊會誤導)。
+        self.start_date = data.get("start_date")
 
     def _save(self) -> None:
         data = {
             "initial_cash": getattr(self, "initial_cash", self.account.cash),
+            "start_date": getattr(self, "start_date", None),
             "cash": self.account.cash,
             "positions": [
                 {"symbol": p.symbol, "shares": p.shares, "avg_price": p.avg_price}
