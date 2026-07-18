@@ -56,7 +56,8 @@ class MultiPaperBroker:
 
         price_fn(symbol) -> 最新收盤價，或 None（抓不到時退回用成本價，不灌水）。
         每筆：label / initial（初始資金）/ cash / mtm（市值總資產）/
-              ret（總報酬率）/ unreal（未實現損益）/ positions（明細 dict list）。
+              ret（總報酬率）/ unreal（未實現損益）/ positions（明細 dict list）/
+              start_date（起算日，大盤對照對齊用）。
         """
         out = []
         for label, b in self.brokers.items():
