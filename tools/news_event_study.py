@@ -7,6 +7,10 @@
 
 方法 (事件研究法)：
 1. 用 FinMind TaiwanStockNews 抓每檔股票的每日新聞則數
+   ⚠️ 官方文件：「由於資料量過大，單次請求只提供一天資料」→ 必須逐日抓。
+   免費層每小時 600 次請求，所以本研究只能做「先導版」：
+   預設 5 檔新聞量大的代表股 × 近一年 ≈ 1,200 次請求 ≈ 2 小時。
+   全量 (150 檔×2 年 = 7.5 萬次) 在免費層不可行，先導結果夠回答方向性問題。
 2. 事件日 = 當日新聞則數 > 過去 window 日的 平均 + k×標準差 (且 >= min_count 則)
 3. 模擬「隔天才看到摘要」的散戶時間線：
    - 事件日 t 的新聞 → 你 t+1 早上 07:30 看到 → 最快 t+1 收盤價進場
@@ -17,13 +21,14 @@
 
 誠實聲明：
 - 新聞「則數」只衡量熱度，分不出利多利空——這是免費資料的極限
-- mid100 成分股有生存者偏差 (今天活著的名單)，結論會偏樂觀
-- 若事件後平均報酬 ≈ 基準線，代表新聞熱度無額外資訊 → 看板只當風險雷達用，別當訊號
+- 只查交易日的新聞 (省一半額度)，週末新聞沒算進熱度——結果略偏保守
+- 樣本只有幾檔大型股，結論外推到中小型股要打折
 
 用法 (在 VM 上、.env 有 FINMIND_TOKEN)：
-    python tools/news_event_study.py                        # tw50+mid100, 近兩年
-    python tools/news_event_study.py --universe tw50 --start 2024-01-01
-新聞與價格都會存 data_cache/，中斷重跑從斷點接續、同日重跑幾乎不耗 API 額度。
+    python tools/news_event_study.py                     # 預設 5 檔 × 近一年，約 2 小時
+    python tools/news_event_study.py --symbols 2330,2317 --start 2025-01-01
+每天的新聞則數都會快取到 data_cache/newsd_*.json：
+中斷/額度用完後重跑同指令，會從斷點接續、已抓過的日子 0 請求。
 """
 from __future__ import annotations
 
@@ -32,7 +37,7 @@ import json
 import os
 import sys
 import time
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -41,13 +46,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 CACHE_DIR = Path("data_cache")
 
+# 預設樣本：新聞量大、市值大到天天有人寫的代表股 (台積電/鴻海/聯發科/廣達/台達電)
+DEFAULT_SYMBOLS = "2330,2317,2454,2382,2308"
+
+
+class QuotaExhausted(Exception):
+    """連續失敗多次，多半是 API 額度用完——進度已快取，稍後重跑即可續。"""
+
 
 # ---------------- 純函式 (可測試) ----------------
 
 def roll_to_trading_days(news_dates: pd.Series, trading_days: pd.DatetimeIndex) -> pd.Series:
-    """把每則新聞的日曆日對齊到「下一個交易日」(含當日)：
-    週末/假日的新聞會累積到下週一，跟你實際看到摘要的節奏一致。
-    回傳 index=交易日、value=新聞則數。"""
+    """把每則新聞的日曆日對齊到「下一個交易日」(含當日)。
+    目前主流程逐日只查交易日、用不到這支；保留給未來加查週末新聞時用。"""
     counts = pd.Series(0, index=trading_days, dtype=int)
     if news_dates.empty or len(trading_days) == 0:
         return counts
@@ -100,118 +111,155 @@ def baseline_returns(close: pd.Series, horizons=(1, 5, 10, 20)) -> dict:
     return out
 
 
-# ---------------- 資料抓取 (含磁碟快取) ----------------
+# ---------------- 逐日抓新聞 (含磁碟快取與額度保護) ----------------
 
-def _news_cache_path(sym: str, start: str, end: str) -> Path:
-    return CACHE_DIR / f"news_{sym}_{start}_{end}.json"
+def fetch_daily_news_counts(api, sym: str, trading_days: pd.DatetimeIndex,
+                            sleep: float) -> pd.Series:
+    """逐「交易日」查該股新聞則數 (TaiwanStockNews 單次請求只回一天)。
 
-
-def fetch_news_dates(api, sym: str, start: str, end: str, sleep: float) -> list:
-    """回傳該股票的新聞日期字串清單 (一則一筆)。快取到磁碟，重跑 0 請求。"""
-    cp = _news_cache_path(sym, start, end)
+    快取：data_cache/newsd_{sym}.json 存 {日期: 則數}，抓過的日子 0 請求，
+    每 20 天存檔一次——中斷/額度用完都不掉進度。
+    連續失敗 6 次視為額度用完，丟 QuotaExhausted (外層收尾、提示續跑)。
+    """
+    cp = CACHE_DIR / f"newsd_{sym}.json"
+    data: dict = {}
     if cp.exists():
         try:
-            return json.loads(cp.read_text())
+            data = json.loads(cp.read_text())
         except Exception:
-            pass
-    df = api.taiwan_stock_news(stock_id=sym, start_date=start, end_date=end)
-    time.sleep(sleep)
-    dates = []
-    if df is not None and not df.empty and "date" in df.columns:
-        # FinMind 的 date 可能含時間，只留日曆日
-        dates = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d").tolist()
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cp.write_text(json.dumps(dates))
-    return dates
+            data = {}
+
+    def _save():
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cp.write_text(json.dumps(data))
+
+    todo = [d.strftime("%Y-%m-%d") for d in trading_days
+            if d.strftime("%Y-%m-%d") not in data]
+    fails = 0
+    for n, ds in enumerate(todo, 1):
+        try:
+            df = api.taiwan_stock_news(stock_id=sym, start_date=ds, end_date=ds)
+            data[ds] = 0 if df is None or df.empty else int(len(df))
+            fails = 0
+        except Exception as e:
+            fails += 1
+            if fails >= 6:
+                _save()
+                raise QuotaExhausted(f"{sym} 連續失敗 6 次 (最後錯誤: {e})")
+            time.sleep(65)  # 可能撞到每小時額度上限，喘口氣再試
+            continue
+        if n % 20 == 0:
+            _save()
+            print(f"      {sym}: 已抓 {len(data)}/{len(trading_days)} 天", flush=True)
+        time.sleep(sleep)
+    _save()
+    return pd.Series({pd.Timestamp(k): int(v) for k, v in data.items()},
+                     dtype=int).reindex(trading_days, fill_value=0)
 
 
 # ---------------- 主流程 ----------------
 
 def main():
-    ap = argparse.ArgumentParser(description="新聞熱度事件研究 (驗證新聞訊號有沒有超額報酬)")
-    ap.add_argument("--universe", default="tw50,mid100", help="逗號分隔: tw50,mid100,top15")
-    ap.add_argument("--start", default="2024-01-01")
+    ap = argparse.ArgumentParser(description="新聞熱度事件研究 (先導版：驗證新聞訊號有沒有超額報酬)")
+    ap.add_argument("--symbols", default=DEFAULT_SYMBOLS,
+                    help=f"逗號分隔股票 (預設新聞大戶 {DEFAULT_SYMBOLS})")
+    ap.add_argument("--universe", default="", help="改用整個股池 (tw50/mid100)——額度警告：一年約 1.2 萬次/50 檔")
+    ap.add_argument("--start", default=(date.today() - timedelta(days=365)).isoformat())
     ap.add_argument("--end", default=date.today().isoformat())
     ap.add_argument("--window", type=int, default=60, help="熱度基準的回看天數")
     ap.add_argument("--sigma", type=float, default=2.0, help="幾個標準差才算暴增")
     ap.add_argument("--min-count", type=int, default=3, help="事件日最少新聞則數")
-    ap.add_argument("--sleep", type=float, default=0.4, help="每次 API 呼叫間隔秒數 (護額度)")
-    ap.add_argument("--max-symbols", type=int, default=0, help="只跑前 N 檔 (0=全部，先小跑驗證用)")
+    ap.add_argument("--sleep", type=float, default=6.0,
+                    help="每次 API 呼叫間隔秒數 (免費層 600 次/時 ≈ 每 6 秒 1 次)")
     args = ap.parse_args()
 
-    from src.data.universe import resolve
     from src.data.finmind import FinMindProvider
     from src.data.cache import DiskCachingProvider
 
-    symbols: list = []
-    for u in args.universe.split(","):
-        for s in resolve(u.strip()):
-            if s not in symbols:
-                symbols.append(s)
-    if args.max_symbols:
-        symbols = symbols[: args.max_symbols]
+    if args.universe:
+        from src.data.universe import resolve
+        symbols = resolve(args.universe)
+    else:
+        symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
 
     raw = FinMindProvider()
     prices = DiskCachingProvider(raw)
     horizons = (1, 5, 10, 20)
 
-    print(f"新聞熱度事件研究：{len(symbols)} 檔｜{args.start} ~ {args.end}｜"
-          f"事件=則數>{args.window}日均+{args.sigma}σ (≥{args.min_count}則)")
+    # 先抓價格 (便宜、多半有快取)，算出「還缺幾天新聞」→ 給出誠實的耗時預估
+    px_map = {}
+    todo_total = 0
+    for sym in symbols:
+        px = prices.history(sym, args.start, args.end)
+        if px is None or px.empty or len(px) < args.window:
+            print(f"  {sym}: 價格資料不足，跳過")
+            continue
+        px_map[sym] = px
+        cp = CACHE_DIR / f"newsd_{sym}.json"
+        cached = set()
+        if cp.exists():
+            try:
+                cached = set(json.loads(cp.read_text()))
+            except Exception:
+                pass
+        todo_total += sum(1 for d in px.index
+                          if d.strftime("%Y-%m-%d") not in cached)
+
+    est_hr = todo_total * args.sleep / 3600
+    print(f"新聞熱度事件研究 (先導版)：{len(px_map)} 檔｜{args.start} ~ {args.end}")
+    print(f"TaiwanStockNews 單次請求只回一天 → 還需 {todo_total:,} 次請求，"
+          f"約 {est_hr:.1f} 小時 (中斷可續跑，Ctrl+C 不掉進度)")
     print("散戶時間線：事件日隔天收盤才進場 (你 07:30 看到摘要之後)\n")
 
-    all_events = []          # 每檔的事件報酬 DataFrame
+    all_events = []
     base_acc = {f"h{h}": [] for h in horizons}
     news_total = 0
-    no_news = 0
+    aborted = False
 
-    for i, sym in enumerate(symbols, 1):
+    for i, (sym, px) in enumerate(px_map.items(), 1):
+        print(f"  [{i}/{len(px_map)}] {sym} 抓新聞中...", flush=True)
         try:
-            px = prices.history(sym, args.start, args.end)
-            if px is None or px.empty or len(px) < args.window:
-                continue
-            dates = fetch_news_dates(raw.api, sym, args.start, args.end, args.sleep)
-            news_total += len(dates)
-            if not dates:
-                no_news += 1
-                continue
-            counts = roll_to_trading_days(
-                pd.Series(pd.to_datetime(dates)), px.index)
-            events = detect_events(counts, args.window, args.sigma, args.min_count)
-            ev_days = events[events].index
-            base = baseline_returns(px["close"], horizons)
-            for h in horizons:
-                if base[f"h{h}"] is not None:
-                    base_acc[f"h{h}"].append(base[f"h{h}"])
-            if len(ev_days) == 0:
-                continue
-            fr = forward_returns(px["close"], ev_days, horizons)
-            if not fr.empty:
-                fr["symbol"] = sym
-                all_events.append(fr)
-            print(f"  [{i}/{len(symbols)}] {sym}: 新聞 {len(dates)} 則 → 事件 {len(ev_days)} 天",
-                  flush=True)
-        except Exception as e:
-            print(f"  [{i}/{len(symbols)}] {sym} 失敗: {e}", flush=True)
+            counts = fetch_daily_news_counts(raw.api, sym, px.index, args.sleep)
+        except QuotaExhausted as e:
+            print(f"\n⏸ 額度疑似用完：{e}")
+            print("   進度已存 data_cache/，等額度重置 (每小時) 後重跑同指令即可續。")
+            aborted = True
+            break
+        news_total += int(counts.sum())
+        events = detect_events(counts, args.window, args.sigma, args.min_count)
+        ev_days = events[events].index
+        base = baseline_returns(px["close"], horizons)
+        for h in horizons:
+            if base[f"h{h}"] is not None:
+                base_acc[f"h{h}"].append(base[f"h{h}"])
+        print(f"      {sym}: 新聞 {int(counts.sum())} 則 → 事件 {len(ev_days)} 天", flush=True)
+        if len(ev_days) == 0:
+            continue
+        fr = forward_returns(px["close"], ev_days, horizons)
+        if not fr.empty:
+            fr["symbol"] = sym
+            all_events.append(fr)
 
-    if news_total == 0:
-        print("\n❌ 一則新聞都抓不到。可能原因：")
-        print("   1) FinMind TaiwanStockNews 需要較高等級 token (跟分點資料一樣被擋)")
-        print("   2) FINMIND_TOKEN 沒設定或額度用完")
-        print("   直接跑: python -c \"from FinMind.data import DataLoader; import os;"
+    if news_total == 0 and not aborted:
+        print("\n❌ 一則新聞都抓不到 (逐日查也是)。請單獨測一天看 API 回什麼：")
+        print("   python -c \"from FinMind.data import DataLoader; import os;"
               " d=DataLoader(); d.login_by_token(api_token=os.getenv('FINMIND_TOKEN'));"
-              " print(d.taiwan_stock_news(stock_id='2330', start_date='2025-06-01',"
-              " end_date='2025-06-30').head())\" 看錯誤訊息。")
+              " print(d.taiwan_stock_news(stock_id='2330', start_date='2026-07-20',"
+              " end_date='2026-07-20'))\"")
         return 1
 
     if not all_events:
-        print(f"\n抓到 {news_total} 則新聞但沒有任何事件日 (門檻太嚴或期間太短)。"
-              f"可調 --sigma 1.5 或 --min-count 2 再試。")
+        if not aborted:
+            print(f"\n抓到 {news_total} 則新聞但沒有任何事件日 (門檻太嚴或期間太短)。"
+                  f"可調 --sigma 1.5 或 --min-count 2 再試。")
         return 0
 
     ev = pd.concat(all_events, ignore_index=True)
     n = len(ev)
     print(f"\n{'='*64}")
-    print(f"事件總數：{n} 個 (跨 {ev['symbol'].nunique()} 檔；{no_news} 檔完全沒新聞資料)")
+    if aborted:
+        print("(以下為「已完成股票」的部分結果，續跑完再看最終版)")
+    print(f"事件總數：{n} 個 (跨 {ev['symbol'].nunique()} 檔)")
     sd = ev["same_day"].dropna()
     if not sd.empty:
         print(f"事件日當天平均已漲跌 {sd.mean():+.2%} (你進場「之前」市場已反映的部分)\n")
@@ -239,7 +287,7 @@ def main():
         print("     → 看板當『風險雷達＋理解工具』用，不要當買進訊號。")
     else:
         print(f"  🟡 持有 {meaningful} 日有 >0.5% 超額——先別興奮，這還沒過三關：")
-        print("     熱度分不出利多利空、mid100 有生存者偏差、也還沒扣手續費。")
+        print("     熱度分不出利多利空、樣本只有幾檔大型股、也還沒扣手續費。")
         print("     要當訊號用，得先做成策略跑 空頭壓力測試 + walkforward 再說。")
     print("  ⚠️ 本研究只有『熱度』沒有『方向』；利多利空混在一起平均，")
     print("     結果偏保守——但這正是免費資料下你實際拿得到的訊號品質。")
