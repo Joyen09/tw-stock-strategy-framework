@@ -60,3 +60,26 @@ def test_baseline_returns_flat_price_is_zero():
     base = baseline_returns(close, horizons=(1, 5))
     assert abs(base["h1"]) < 1e-12
     assert abs(base["h5"]) < 1e-12
+
+
+def test_fetch_daily_news_counts_one_request_per_day_and_caches(tmp_path, monkeypatch):
+    """TaiwanStockNews 單次只回一天 → 必須逐日各打一次；第二輪要走快取 0 請求。"""
+    import tools.news_event_study as nes
+
+    monkeypatch.setattr(nes, "CACHE_DIR", tmp_path)
+    calls = []
+
+    class FakeApi:
+        def taiwan_stock_news(self, stock_id, start_date, end_date):
+            calls.append(start_date)
+            assert start_date == end_date  # 逐日查：一天一請求
+            return pd.DataFrame({"date": [start_date] * 2, "title": ["a", "b"]})
+
+    days = pd.bdate_range("2024-01-01", periods=3)
+    s1 = nes.fetch_daily_news_counts(FakeApi(), "2330", days, sleep=0)
+    assert list(s1) == [2, 2, 2]
+    assert len(calls) == 3
+
+    s2 = nes.fetch_daily_news_counts(FakeApi(), "2330", days, sleep=0)
+    assert len(calls) == 3  # 全部命中快取，沒有新請求
+    assert list(s2) == [2, 2, 2]
