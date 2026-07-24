@@ -1,0 +1,13 @@
+{
+  "dataset": "TaiwanStockMonthRevenue",
+  "purpose": "monthly-revenue-overlay-spec §2.1/§2.5 欄位語意紀錄（Phase 0 驗收項）",
+  "verified_from": "FinMind SDK 原始碼 (FinMind/data/data_loader.py taiwan_stock_month_revenue, FinMind 2.0.5)，線上最終確認工具: tools/rev_probe.py（沙箱網路封鎖 FinMind，需在 VM 執行；執行後原始樣本會存 tests/fixtures/rev_api_sample_raw.json）",
+  "columns": ["date", "stock_id", "country", "revenue", "revenue_month", "revenue_year"],
+  "semantics": {
+    "date": "資料月 +1 個月（公告月）的月初，非規格假設的『資料所屬月份』。SDK docstring 原文: 'Since the revenue in January, the public time is usually only announced in February, so the date plus one month'。無實際逐家公告日欄位 → spec §2.3 的統一『次月 announce_day 日』規則維持適用。",
+    "revenue": "月營收，新台幣元（int）",
+    "revenue_year_month": "資料所屬年/月——框架唯一採用的資料月依據；date 僅保留為 date_raw 供稽核，不參與任何計算",
+    "sdk_start_end": "SDK 的 taiwan_stock_month_revenue 會把 start_date/end_date 先 +1 個月再送 API（抵銷 date 偏移），故經 DataLoader 的起訖參數以『資料月』為語意"
+  },
+  "recorded_at": "2026-07-24"
+}

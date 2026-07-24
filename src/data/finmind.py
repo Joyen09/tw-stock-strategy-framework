@@ -170,6 +170,56 @@ class FinMindProvider(DataProvider):
 
         return f
 
+    # 月營收欄位語意（monthly-revenue-overlay-spec §2.1，已依 FinMind SDK 原始碼驗證；
+    # 線上最終確認：tools/rev_probe.py，沙箱網路封鎖 FinMind、需在 VM 跑）：
+    # TaiwanStockMonthRevenue 回傳 date / stock_id / country / revenue /
+    # revenue_month / revenue_year。
+    # 1) `date` 欄位 = 資料月 **+1 個月**（公告月月初）——SDK docstring 原文
+    #    "the public time is usually only announced in February, so the date plus
+    #    one month"。規格 §2.1 的假設（date=資料所屬月份）與實際相反。
+    # 2) 沒有「實際逐家公告日」欄位 → §2.3 統一「次月 announce_day 日」規則維持適用。
+    # 3) SDK 的 taiwan_stock_month_revenue 會把 start/end 先 +1 個月再打 API
+    #    （抵銷 date 的偏移）→ 透過 DataLoader 傳的起訖日以「資料月」為語意。
+    # 本框架加一層保險：資料所屬月份一律以 revenue_year / revenue_month 為唯一依據
+    # （語意無歧義），date 只原樣保留成 date_raw 供稽核，不參與任何計算；
+    # 可知時點一律由 src/rev_dates.effective_date() 從 (rev_year, rev_month) 推得。
+    def get_month_revenue(self, stock_ids, start: str, end: str) -> pd.DataFrame:
+        """抓月營收（TaiwanStockMonthRevenue），回傳 long-format DataFrame。
+
+        欄位：stock_id / rev_year / rev_month / revenue（新台幣元）/ date_raw。
+        同一 (stock_id, 資料月) 若 API 回多筆（修正值），保留最後一筆。
+        單檔失敗直接拋例外（額度/斷線由上層 MonthRevenueStore 處理，
+        才能把「抓失敗」與「查過但該月確實沒資料」區分開——後者才是缺月）。
+        """
+        frames = []
+        for sym in stock_ids:
+            df = self.api.taiwan_stock_month_revenue(
+                stock_id=sym, start_date=start, end_date=end
+            )
+            if df is None or df.empty:
+                continue
+            out = pd.DataFrame({
+                "stock_id": df["stock_id"].astype(str),
+                "rev_year": pd.to_numeric(df["revenue_year"], errors="coerce"),
+                "rev_month": pd.to_numeric(df["revenue_month"], errors="coerce"),
+                "revenue": pd.to_numeric(df["revenue"], errors="coerce"),
+                "date_raw": df["date"].astype(str) if "date" in df.columns else "",
+            })
+            out = out.dropna(subset=["rev_year", "rev_month", "revenue"])
+            out["rev_year"] = out["rev_year"].astype(int)
+            out["rev_month"] = out["rev_month"].astype(int)
+            out["revenue"] = out["revenue"].astype("int64")
+            # 髒列防線：月份/年份不合法的列直接丟（曾驗證過 rev_month=13 之類的
+            # 髒資料會毒化下游快取檔，之後每次讀取都炸——擋在進快取之前）
+            out = out[out["rev_month"].between(1, 12) & out["rev_year"].between(1990, 2100)]
+            frames.append(out)
+        if not frames:
+            return pd.DataFrame(columns=["stock_id", "rev_year", "rev_month", "revenue", "date_raw"])
+        allrows = pd.concat(frames, ignore_index=True)
+        allrows = allrows.sort_values(["stock_id", "rev_year", "rev_month"])
+        allrows = allrows.drop_duplicates(subset=["stock_id", "rev_year", "rev_month"], keep="last")
+        return allrows.reset_index(drop=True)
+
     def institutional(self, symbol: str, start: str, end: str) -> Optional[pd.DataFrame]:
         """三大法人每日買賣超 (股)。欄位 trust_net=投信、foreign_net=外資 (含外資自營)。
 
