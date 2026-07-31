@@ -18,8 +18,27 @@ import os
 from typing import List
 
 from ..models import Position
-from .base import Order
+from . import fees
+from .base import Order, OrderSide
 from .paper import PaperBroker
+
+MAX_TRADES = 500  # 成交紀錄保留上限 (超過丟最舊的)，避免帳戶檔無限長大
+
+
+def _valid_date(v):
+    """只接受 YYYY-MM-DD；手動編輯帳戶檔時填錯 (例如填成說明文字) 就當作沒設定。
+
+    start_date 錯誤不能讓 report 整個炸掉，但也不能拿爛值去對大盤——靜靜忽略最安全。
+    """
+    if not isinstance(v, str):
+        return None
+    try:
+        import datetime as _dt
+        _dt.date.fromisoformat(v)
+        return v
+    except ValueError:
+        print(f"[paper] ⚠️ start_date 格式錯誤 ({v!r})，需 YYYY-MM-DD；本次忽略、不做大盤對照")
+        return None
 
 
 class PersistentPaperBroker(PaperBroker):
@@ -39,6 +58,7 @@ class PersistentPaperBroker(PaperBroker):
         # 初始資金：算報酬率要用。新帳戶=建構子 cash；舊檔沒存過就回填估計值。
         self.initial_cash = self.account.cash
         self.start_date = None  # 帳戶起算日 (算「同期大盤報酬」對照用)；舊檔沒存就下次存檔補今天
+        self.trades = []  # 成交紀錄 (跨執行持久化)；沒有它就無法回答「錢是怎麼虧的」
         if not os.path.exists(self.path):
             return  # 首次執行：用建構子的初始 cash、空持倉
         try:
@@ -63,7 +83,8 @@ class PersistentPaperBroker(PaperBroker):
             self.initial_cash = self.account.cash + cost
         # start_date 只在「全新帳戶建立時」由 __init__ 設定 (=真正起算日)；
         # 舊帳戶檔沒存過就維持 None，report 不硬湊大盤對照 (窗口對不齊會誤導)。
-        self.start_date = data.get("start_date")
+        self.start_date = _valid_date(data.get("start_date"))
+        self.trades = list(data.get("trades", []))
 
     def _save(self) -> None:
         data = {
@@ -75,6 +96,7 @@ class PersistentPaperBroker(PaperBroker):
                 for p in self.account.positions.values()
                 if p.shares > 0
             ],
+            "trades": getattr(self, "trades", [])[-MAX_TRADES:],
         }
         # 原子寫入：先寫暫存檔再 rename，避免排程當中被中斷寫壞檔案。
         tmp = self.path + ".tmp"
@@ -88,6 +110,37 @@ class PersistentPaperBroker(PaperBroker):
         self._load()
 
     def place_order(self, order: Order) -> Order:
+        # 賣出後 avg_price 會被歸零，實現損益要在成交「之前」先記下成本。
+        pos = self.account.positions.get(order.symbol)
+        avg_before = pos.avg_price if pos else 0.0
         result = super().place_order(order)
+        if result.filled:
+            self._record_trade(result, avg_before)
         self._save()  # 每次下單後落地，跨執行不遺失
         return result
+
+    def _record_trade(self, order: Order, avg_before: float) -> None:
+        """把成交寫進持久化紀錄。賣出時一併算實現損益 (已扣賣出手續費與證交稅)。
+
+        沒有這份紀錄，帳戶只看得到「現在剩多少」，回答不了「錢是怎麼虧的」——
+        報酬率難看時無法區分「停損停在最低點」「手續費吃掉」「單純市場在跌」。
+        """
+        import datetime as _dt
+
+        rec = {
+            "date": _dt.date.today().isoformat(),
+            "symbol": order.symbol,
+            "side": "BUY" if order.side == OrderSide.BUY else "SELL",
+            "shares": int(order.shares),
+            "price": float(order.fill_price or order.price),
+            "reason": (order.note or "").strip(),
+        }
+        if order.side == OrderSide.SELL and avg_before > 0:
+            amount = order.shares * rec["price"]
+            proceeds = fees.sell_proceeds(amount, self.fee_discount)
+            # 成本基礎用建倉均價 (不含買進手續費)，故實現損益略為樂觀約一筆買進手續費。
+            rec["realized"] = round(proceeds - order.shares * avg_before, 2)
+            rec["avg_cost"] = round(avg_before, 3)
+        if not hasattr(self, "trades"):
+            self.trades = []
+        self.trades.append(rec)

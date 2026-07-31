@@ -34,7 +34,8 @@ from .control import (
 )
 
 
-_KNOWN_CMDS = {"budget", "maxpos", "maxpositions", "pause", "resume", "status",
+_KNOWN_CMDS = {
+    "trades", "log","budget", "maxpos", "maxpositions", "pause", "resume", "status",
                "help", "start", "holdings", "positions", "sell", "report", "pnl"}
 
 

@@ -84,6 +84,7 @@ def apply_command(text: str, cfg: dict) -> Tuple[str, dict]:
     if cmd in ("help", "start"):
         return ("可用指令：\n/budget 60000\n/maxpos 5\n/pause\n/resume\n/status\n"
                 "/holdings（看持倉，成本計）\n/report（看績效，市值計含報酬率）\n"
+                "/trades（看已實現損益與交易成本）\n"
                 "/sell 2330 或 /sell all（手動賣）", cfg)
     return "", cfg  # 不認得的訊息不回（避免洗版）
 
@@ -91,7 +92,8 @@ def apply_command(text: str, cfg: dict) -> Tuple[str, dict]:
 # --- 需要券商連線的指令 (/holdings, /sell)；apply_command 只處理設定類 ---
 def is_broker_command(text: str) -> bool:
     parts = (text or "").strip().lstrip("/").split()
-    return bool(parts) and parts[0].lower() in ("holdings", "positions", "sell", "report", "pnl")
+    return bool(parts) and parts[0].lower() in (
+        "holdings", "positions", "sell", "report", "pnl", "trades", "log")
 
 
 def handle_broker_command(text: str, broker) -> str:
@@ -175,7 +177,39 @@ def _handle_multi_paper(cmd: str, arg, broker) -> str:
     if cmd in ("report", "pnl"):
         return _format_report(broker.report(_latest_price_fn()))
 
+    if cmd in ("trades", "log"):
+        return _format_trades(broker.realized_summary())
+
     return ""
+
+
+def _format_trades(rows) -> str:
+    """把 realized_summary() 排成訊息：把「已實現虧損」與「交易成本」攤開來看。"""
+    if not rows:
+        return "📭 尚無已建檔的模擬帳戶。"
+    lines = ["🧾 已實現損益（帳戶開始跑之後的所有平倉）："]
+    tot_real = tot_fee = 0.0
+    any_trade = False
+    for r in rows:
+        tot_real += r["realized"]
+        tot_fee += r["fees_est"]
+        closed = r["wins"] + r["losses"]
+        if r["n_buy"] or r["n_sell"]:
+            any_trade = True
+        sign = "🟢" if r["realized"] >= 0 else "🔴"
+        lines.append(f"【{r['label']}】{sign} 已實現 {r['realized']:+,.0f}"
+                     f"（{closed} 筆平倉：{r['wins']} 賺 / {r['losses']} 賠）")
+        lines.append(f"　買 {r['n_buy']} 次、賣 {r['n_sell']} 次｜手續費+稅約 {r['fees_est']:,.0f}")
+        for t in r["recent"]:
+            pnl = f"　損益 {t['realized']:+,.0f}" if "realized" in t else ""
+            lines.append(f"　{t['date']} {t['side']} {t['symbol']} {t['shares']}股"
+                         f" @ {t['price']:.1f}{pnl}")
+    lines.append("━━━━━━━━━━")
+    lines.append(f"合計已實現 {tot_real:+,.0f}｜交易成本約 {tot_fee:,.0f}")
+    if not any_trade:
+        lines.append("⚠️ 目前沒有任何成交紀錄——成交記帳是這次才加的，")
+        lines.append("　 在此之前的買賣沒被記下來，只有從現在開始的交易才查得到。")
+    return "\n".join(lines)
 
 
 def _latest_price_fn():
