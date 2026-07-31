@@ -16,6 +16,7 @@ import os
 from typing import Dict, List, Tuple
 
 from ..models import Position
+from . import fees
 from .base import Order
 from .persistent_paper import PersistentPaperBroker
 
@@ -86,6 +87,38 @@ class MultiPaperBroker:
                 "label": label, "initial": initial, "cash": cash, "mtm": mtm,
                 "ret": ret, "unreal": unreal, "positions": details,
                 "start_date": getattr(b, "start_date", None),
+            })
+        return out
+
+    def realized_summary(self) -> List[dict]:
+        """各帳戶的已實現損益彙總 (給 /trades 用)：回答「錢是怎麼虧的」。
+
+        每筆：label / realized(已實現損益合計) / wins / losses / n_buy / n_sell /
+              fees_est(手續費+稅估計) / recent(最近幾筆成交)。
+        """
+        out = []
+        for label, b in self.brokers.items():
+            if not os.path.exists(b.path):
+                continue
+            trades = getattr(b, "trades", []) or []
+            closed = [t for t in trades if "realized" in t]
+            realized = sum(t["realized"] for t in closed)
+            # 成本估計：每筆成交都有手續費 (小額受 20 元低消支配)，賣出另加證交稅
+            fee_est = 0.0
+            for t in trades:
+                amount = t["shares"] * t["price"]
+                fee_est += max(amount * fees.BROKER_FEE_RATE * b.fee_discount, fees.MIN_FEE)
+                if t["side"] == "SELL":
+                    fee_est += amount * fees.TAX_RATE
+            out.append({
+                "label": label,
+                "realized": realized,
+                "wins": sum(1 for t in closed if t["realized"] > 0),
+                "losses": sum(1 for t in closed if t["realized"] <= 0),
+                "n_buy": sum(1 for t in trades if t["side"] == "BUY"),
+                "n_sell": sum(1 for t in trades if t["side"] == "SELL"),
+                "fees_est": fee_est,
+                "recent": trades[-5:],
             })
         return out
 
