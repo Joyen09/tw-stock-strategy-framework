@@ -268,6 +268,39 @@ def _taiex_return_since(start_date: str):
         return None
 
 
+def _taiex_returns_by_start(starts) -> dict:
+    """各帳戶「自己的起算日」到今天的大盤報酬 → {start_date: 報酬率}。
+
+    為什麼要分開算：三個帳戶啟用日不同 (例如 mid100 晚兩週才開)，
+    若全部拿最早那天當基準，晚開的帳戶會被拿去比一段它根本沒參與的行情。
+    只打一次 API 抓最早起算日至今，其餘用切片，額外成本 0。
+    """
+    starts = [s for s in starts if s]
+    if not starts:
+        return {}
+    try:
+        import pandas as pd
+
+        from src.data.finmind import FinMindProvider
+        from src.data.cache import DiskCachingProvider
+        provider = DiskCachingProvider(FinMindProvider())
+        s = provider.benchmark(min(starts), _today_str())
+        if s is None or len(s) < 2:
+            return {}
+        last = float(s.iloc[-1])
+        out = {}
+        for sd in set(starts):
+            sub = s[s.index >= pd.Timestamp(sd)]  # 起算日之後的第一個交易日
+            if len(sub) < 2:
+                continue
+            first = float(sub.iloc[0])
+            if first > 0:
+                out[sd] = last / first - 1
+        return out
+    except Exception:
+        return {}
+
+
 def _format_report(rows) -> str:
     """把 MultiPaperBroker.report() 的結果排成一則績效訊息。"""
     if not rows:
@@ -275,12 +308,19 @@ def _format_report(rows) -> str:
     lines = ["📊 模擬盤績效（市值計，最新收盤價）："]
     tot_init = tot_mtm = 0.0
     any_estimated = False
+    # 各帳戶用「自己的起算日」對照大盤：晚開的帳戶不該被拿去比它沒參與的行情。
+    benches = _taiex_returns_by_start([r.get("start_date") for r in rows])
     for r in rows:
         tot_init += r["initial"]
         tot_mtm += r["mtm"]
         sign = "🟢" if r["ret"] >= 0 else "🔴"
         lines.append(f"【{r['label']}】{sign} 報酬 {r['ret']:+.2%}"
                      f"（市值 {r['mtm']:,.0f} / 初始 {r['initial']:,.0f}）")
+        b = benches.get(r.get("start_date"))
+        if b is not None:
+            d = r["ret"] - b
+            lines.append(f"　📈 同期大盤 {b:+.2%}｜{'🟢 領先' if d >= 0 else '🔴 落後'} {d:+.2%}"
+                         f"（{r['start_date']} 起算）")
         for d in r["positions"]:
             mark = "" if d["priced"] else "⚠成本價"
             lines.append(f"　{d['symbol']} {d['shares']}股：{d['pnl']:+,.0f} 元 "
@@ -296,17 +336,23 @@ def _format_report(rows) -> str:
     lines.append(f"━━━━━━━━━━")
     lines.append(f"💰 三帳戶合計 {tsign} {tot_ret:+.2%}"
                  f"（市值 {tot_mtm:,.0f} / 初始 {tot_init:,.0f}｜損益 {tot_unreal:+,.0f}）")
-    # 大盤對照：贏過大盤才是真本事（分開「市場漲跌」與「策略優劣」）。用最早的起算日對齊。
+    # 合計的大盤對照用最早起算日（涵蓋整個空跑期間）。
     starts = [r["start_date"] for r in rows if r.get("start_date")]
     if starts:
-        bench = _taiex_return_since(min(starts))
+        bench = benches.get(min(starts))
         if bench is not None:
             diff = tot_ret - bench
             vs = "🟢 領先大盤" if diff >= 0 else "🔴 落後大盤"
             lines.append(f"📈 同期大盤 (TAIEX) {bench:+.2%}｜{vs} {diff:+.2%}")
+            # 空頭時「少賠」有一部分只是因為手上有現金、沒滿倉，不全是選股功勞。
+            cash = sum(r["cash"] for r in rows)
+            if tot_mtm > 0 and bench < 0:
+                pos_ratio = 1 - cash / tot_mtm
+                lines.append(f"　（持股水位 {pos_ratio:.0%}、現金 {cash:,.0f}；"
+                             f"空頭少賠有一部分來自沒滿倉，非全是選股）")
     if any_estimated:
         lines.append("⚠標記者抓不到最新價，暫用成本價（顯示 0 損益）")
-    lines.append("ℹ️ 空跑未滿一個月，數字仍多為市場波動、參考即可；重點看長期與回撤。")
+    lines.append("ℹ️ 樣本期間短，數字仍多為市場波動、參考即可；重點看長期與回撤。")
     return "\n".join(lines)
 
 
