@@ -35,8 +35,10 @@ from .control import (
 
 
 _KNOWN_CMDS = {
-    "trades", "log","budget", "maxpos", "maxpositions", "pause", "resume", "status",
-               "help", "start", "holdings", "positions", "sell", "report", "pnl"}
+    "budget", "maxpos", "maxpositions", "pause", "resume", "status",
+    "help", "start", "holdings", "positions", "sell", "report", "pnl",
+    "trades", "log",
+}
 
 
 def process_command(text: str, broker) -> str:
@@ -61,7 +63,7 @@ def process_command(text: str, broker) -> str:
     try:
         if cmd_word not in _KNOWN_CMDS:
             return (f"❓ 不認得指令「{cmd_word}」。\n"
-                    "可用：/status /report /holdings /pause /resume "
+                    "可用：/status /report /trades /holdings /pause /resume "
                     "/budget N /maxpos N /sell 2330｜傳 /help 看說明。\n"
                     "（若剛更新過程式，記得 sudo systemctl restart stockbot-discord-listen）")
         if is_broker_command(norm):
