@@ -334,6 +334,7 @@ def cmd_scan(args):
         max_positions=max_pos,
         paused=paused,
         max_order_value=args.max_order_value,
+        cooldown_days=args.cooldown,
     )
     plans = trader.scan(symbols, end)
     if paused:
@@ -563,6 +564,8 @@ def build_parser():
     sc.add_argument("--notify", action="store_true", help="把交易訊號推到 Telegram")
     sc.add_argument("--max-positions", type=int, default=0, help="最多同時持有幾檔(只買訊號最強的前N檔)；0=不限")
     sc.add_argument("--universe", default="top15", help="未指定 --symbols 時的候選池: top15 或 tw50")
+    sc.add_argument("--cooldown", type=int, default=5,
+                    help="賣出後幾個交易日內不重買 (防洗盤，與回測同預設)，0=關閉")
     sc.set_defaults(func=cmd_scan)
 
     pk = sub.add_parser("pick", help="科學選股：一個策略逐檔回測，挑夏普最高的前 N 檔")
