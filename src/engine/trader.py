@@ -3,7 +3,7 @@
 設計成「跑一次 = 掃一輪標的」，由外部排程器 (cron / APScheduler) 在盤中或收盤後觸發，
 而不是在程式內 while True，方便控制與除錯。
 
-安全預設：dy_run=True 只印出「會下什麼單」但不真的送出，確認無誤再關閉。
+安全預設：dry_run=True 只印出「會下什麼單」但不真的送出，確認無誤再關閉。
 """
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ class LiveTrader:
         self.notifier = notifier
 
     def _in_cooldown(self, symbol: str, df: pd.DataFrame) -> bool:
-        """這檔最近賣出後還沒過冷却期？用帳戶的成交紀錄判斷 (跨排程執行有效)。
+        """這檔最近賣出後還沒過冷卻期？用帳戶的成交紀錄判斷 (跨排程執行有效)。
 
         交易日數以價格資料的索引計算，與回測「第幾根 K」的語意一致。
         券商沒有成交紀錄 (例如 Shioaji) 時不阻擋，只是失去這層保護。
@@ -169,7 +169,7 @@ class LiveTrader:
             if sig.action == Action.BUY and pos is None:
                 if not bull_market:  # 大盤空頭，禁止做多 (與回測一致)
                     continue
-                if self._in_cooldown(sym, df):  # 剛停損出場，冷却期內不追回 (與回測一致)
+                if self._in_cooldown(sym, df):  # 剛停損出場，冷卻期內不追回 (與回測一致)
                     continue
                 budget = self.position_budget * sig.strength
                 shares = int(budget // price) if self.allow_odd_lot else int(budget // (price * LOT)) * LOT
