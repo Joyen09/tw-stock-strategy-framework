@@ -53,12 +53,13 @@ def test_position_ratio_disclosed_in_bear_market(fake_taiex):
     assert "74%" in msg  # 1 - 16255/62150
 
 
-def test_no_position_ratio_note_when_market_up(monkeypatch):
-    """多頭時不需要這句提醒 (少賠的邏輯不適用)。"""
+def test_no_cash_caveat_when_market_up(monkeypatch):
+    """多頭時「空頭少賠靠現金」的因果不成立，不該出現；但水位本身仍是有用資訊。"""
     monkeypatch.setattr(control, "_taiex_returns_by_start", lambda s: {"2026-01-02": 0.08})
     msg = control._format_report([_row("lynch", 0.12, "2026-01-02", cash=1000.0, mtm=10000.0)])
     assert "領先大盤" in msg
-    assert "持股水位" not in msg
+    assert "持股水位 90%" in msg
+    assert "非全是選股" not in msg
 
 
 def test_account_without_start_date_gets_no_benchmark_line(monkeypatch):
@@ -85,3 +86,61 @@ def test_no_start_dates_skips_api_entirely():
     """全部帳戶都沒起算日時不該打 API (省額度)。"""
     assert control._taiex_returns_by_start([None, None]) == {}
     assert control._taiex_returns_by_start([]) == {}
+
+
+def _pos(sym, shares, avg, last):
+    return {"symbol": sym, "shares": shares, "avg": avg, "last": last,
+            "priced": True, "pnl": shares * (last - avg)}
+
+
+def _row2(label, initial, mtm, cash, unreal, positions, start="2026-06-20"):
+    return {"label": label, "initial": initial, "cash": cash, "mtm": mtm,
+            "ret": mtm / initial - 1, "unreal": unreal, "positions": positions,
+            "start_date": start}
+
+
+def test_realized_and_unrealized_are_split(monkeypatch):
+    """帳面浮盈掩蓋已砍掉的實虧時，兩者要分開顯示——意義完全不同。"""
+    monkeypatch.setattr(control, "_taiex_returns_by_start", lambda s: {})
+    # 初始 17,903 → 市值 23,905，其中未實現 +6,236 → 已實現應為 -234
+    row = _row2("mid100", 17903, 23905, 3072, 6236, [_pos("2006", 103, 72.4, 80.9)])
+    msg = control._format_report([row])
+    assert "未實現 +6,236" in msg
+    assert "已實現 -234" in msg
+    assert "已實現 -234｜未實現 +6,236" in msg  # 合計行也要有
+
+
+def test_single_position_over_half_triggers_warning(monkeypatch):
+    """一檔就佔帳戶一半以上：績效被它綁架，要另外拉一行示警。"""
+    monkeypatch.setattr(control, "_taiex_returns_by_start", lambda s: {})
+    row = _row2("mid100", 17903, 23905, 3072, 6236,
+                [_pos("2006", 103, 72.4, 80.9), _pos("2059", 1, 7140.0, 12500.0)])
+    msg = control._format_report([row])
+    assert "2059 佔該帳戶 52%" in msg
+    assert "單一持股主導" in msg
+    assert "佔52%" in msg  # 該筆後面也標佔比
+
+
+def test_normal_concentration_notes_but_does_not_warn(monkeypatch):
+    """只持有 2~3 檔時三成是正常配置：標佔比即可，不該拉警告行洗版。"""
+    monkeypatch.setattr(control, "_taiex_returns_by_start", lambda s: {})
+    row = _row2("lynch", 29940, 27022, 2989, 1736,
+                [_pos("2880", 186, 40.1, 39.0), _pos("2890", 194, 38.6, 40.5),
+                 _pos("1303", 43, 170.5, 207.5)])
+    msg = control._format_report([row])
+    assert "佔33%" in msg          # 有標佔比
+    assert "單一持股主導" not in msg  # 但沒有警告行
+
+
+def test_cash_caveat_only_when_meaningfully_underinvested(monkeypatch):
+    """持股水位 89% 時不能再說「少賠是因為沒滿倉」——那句話已不成立。"""
+    monkeypatch.setattr(control, "_taiex_returns_by_start", lambda s: {"2026-06-20": -0.0404})
+    high = _row2("a", 67803, 68136, 7619, 8446, [_pos("2330", 10, 1000.0, 1000.0)])
+    msg = control._format_report([high])
+    assert "持股水位 89%" in msg
+    assert "非全是選股" not in msg
+
+    monkeypatch.setattr(control, "_taiex_returns_by_start", lambda s: {"2026-06-20": -0.1636})
+    low = _row2("a", 67803, 62150, 16255, -5653, [_pos("2330", 10, 1000.0, 1000.0)])
+    msg2 = control._format_report([low])
+    assert "非全是選股" in msg2  # 26% 現金時這句仍成立
