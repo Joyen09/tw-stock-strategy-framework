@@ -1,4 +1,4 @@
-"""lynch 季線緩衝：遲滞區間的行為（不打 API，純邏輯）。"""
+"""lynch 季線緩衝：緩衝區間的行為（不打 API，純邏輯）。"""
 import pandas as pd
 import pytest
 
