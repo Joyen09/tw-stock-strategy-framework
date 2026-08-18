@@ -103,6 +103,8 @@ SHIOAJI_PERSON_ID=<你的身分證字號>   # 實際值只放 VM 的 .env，勿�
 3. **"Please sign ... first" 錯誤** = 要在永豐官網「線上簽署 API」（已完成）。
 4. **Git 推送**：Claude 沙箱推 main 會 503；用 GitHub API (`mcp__github__push_files`) 直推 main 可行（2026-07-03 實證），
    或推功能分支開 PR 由使用者 merge。使用者的 VM 推 main 正常。
+   ⚠️ API 推送常把中文打成別字（灌→灸、卻→却、暫→暗），**每次推完必跑
+   `git fetch origin main && git diff origin/main HEAD` 驗證**，有差異就用真實字元重推。
 5. **`--end` 預設已改成今天**（scan/screen）。
 6. **零股 bug（已修 PR#4）**：舊版把零股用 `shares//1000` 換算暴買 500 倍。已改 Common(張)+IntradayOdd(股)。
 7. **零股 >999 拆單 bug（已修）**：盤中零股單筆上限 999 股，`plan_order_lots()` 拆整張+零股兩段。
@@ -116,6 +118,8 @@ SHIOAJI_PERSON_ID=<你的身分證字號>   # 實際值只放 VM 的 .env，勿�
     （財報 7 天 TTL、價格/籌碼 1 天 TTL、同日重跑幾乎 0 請求）。查用量：
     `curl -s "https://api.finmindtrade.com/api/v4/user_info?token=$FINMIND_TOKEN"`
     三個 scan 錯開兩個小時窗（14:00/14:20 一組、15:30 一組）就是為了額度。
+    ⚠️ `TaiwanStockNews`**單次請求只回一天**（官方文件備註），要逐日抓；
+    全量 150 檔×2 年 = 7.5 萬次請求，免費層不可行。
 12. **TAIEX 請求會 hang**：benchmark 已包 15s timeout，逾時自動用選股池等權平均當大盤代理，regime 照常運作。
 13. **籌碼策略 (mclean/trust) 若要部署**：法人資料 15:00–16:00 才公布，timer 應設 18:00 後；
     回測用 T-1 籌碼比實盤保守，方向一致。（目前籌碼策略全數淘汰，僅存檔備查。）
@@ -132,6 +136,13 @@ SHIOAJI_PERSON_ID=<你的身分證字號>   # 實際值只放 VM 的 .env，勿�
 18. **空頭壓測不能空過**：第一版把空頭期設 2022-01-01 起，結果 0 筆交易——大盤濾網全年禁止做多，
     策略從頭空手到尾，那一關等於沒測到。已改成從 2021-07 起算（先建倉再遇下跌），
     且 0 筆交易一律判未通過。**空過比失敗更危險，它給出假的安全感。**
+19. **報告要分「已實現/未實現」**：2026-08 週報顯示合計 +0.49% 看似轉正，拆開後是
+    已實現 -8,113、未實現 +8,446，且浮盈六成來自單一持股（川湖佔該帳戶 52%）。
+    report 現在會拆開顯示並在單一持股 >50% 時示警。
+20. **新聞熱度無超額報酬（2026-08 驗證）**：事件研究法測「新聞量暴增後隔天進場」，
+    事件日當天已平均漲 +0.67%（進場前就被反映），事後 1/5/10/20 日全部**輸給隨機日基準**
+    （-0.85%/-2.22%/-3.32%/-4.35%）。→ 新聞看板只當**風險雷達/理解工具**，不當買進訊號。
+    工具留存：`tools/news_event_study.py`。
 
 ## 5. 下一步
 
@@ -139,6 +150,7 @@ SHIOAJI_PERSON_ID=<你的身分證字號>   # 實際值只放 VM 的 .env，勿�
 2. 空跑穩定後要上真錢：先改執行端為「盤後算訊號 → 隔日開盤送單」+ 永豐實單審核 + 重新分配 5 萬到表現最好的組合。
 3. raiho 可當季度 screener 手動跑（財報季後）：`python main.py screen/pick --strategy raiho ...`。
 4. ✅ Discord bot 雙向控制已完成（discord_listen.py）；Telegram listener 可停用。
+5. 觀察 cooldown 補上後的效果：`/trades` 看來回洗的次數是否下降（2026-08-18 起才有紀錄）。
 
 ## 6. 常用指令速查
 
@@ -151,12 +163,15 @@ python main.py compare --strategy lynch,livermore --source finmind --universe mi
 python main.py scan --strategy lynch --source finmind --universe tw50 --regime --paper --cash 30000 --max-positions 3 --budget 10000 --notify
 python main.py scan --strategy livermore --source finmind --universe tw50 --regime --paper --paper-file paper_livermore.json --cash 20000 --max-positions 2 --budget 10000 --notify
 python main.py scan --strategy lynch --source finmind --universe mid100 --regime --paper --paper-file paper_lynch_mid100.json --cash 20000 --max-positions 2 --budget 10000 --notify
+python main.py report --notify                        # 績效報告（市值計+大盤對照），可排程週推
 python discord_listen.py --paper                       # Discord 雙向控制（預設三帳戶）
 python main.py listen --paper --paper-file "lynch=paper_account.json,livermore=paper_livermore.json,lynch-mid100=paper_lynch_mid100.json"   # (Telegram 版，bot 凍結中)
 python main.py shioaji-test                           # 測 Shioaji 連線
 python main.py notify-test                            # 測通知（Telegram+Discord 都會發）
+python tools/validate_lynch_buffer.py --universe tw50 # 策略參數改動的三關驗證（標準事前寫死）
 ```
-控制指令（Discord 用 / 或 ! 前綴）：`/status /budget N /maxpos N /pause /resume /holdings /sell 2330 /sell all`
+⚠️ VM 上要用 `.venv/bin/python`，系統沒有裸 `python`。
+控制指令（Discord 用 / 或 ! 前綴）：`/status /budget N /maxpos N /pause /resume /holdings /report /trades /sell 2330 /sell all`
 
 ## 7. 系統架構速覽
 
@@ -170,13 +185,14 @@ src/
 ├── strategies/       # buffett/graham/lynch/oneil/livermore/mclean(法人籌碼)/momentum(短線快層)/
 │                     #   trust(投信認養)/floor(地板股)/raiho(雷浩斯矩陣)/us_overnight
 ├── data/             # sample(離線) / finmind(真實,含法人買賣超+現金流) / cache(記憶體+磁碟) / universe(top15/tw50/mid100)
-├── broker/           # paper / persistent_paper / multi_paper(多帳戶聚合) / shioaji_broker / fees
-└── engine/           # backtest(回測,含籌碼T+1切片) / trader(實盤 scan,含心跳) / screener
+├── broker/           # paper / persistent_paper(含成交紀錄) / multi_paper(多帳戶聚合) / shioaji_broker / fees
+└── engine/           # backtest(回測,含籌碼T+1切片) / trader(實盤 scan,含心跳+冷卻期) / screener
 main.py               # CLI 入口
 discord_listen.py     # Discord 雙向控制入口
 examples/simulate_days.py   # 逐日持倉模擬
+tools/                # news_event_study.py(新聞事件研究) / validate_lynch_buffer.py(參數三關驗證)
 deploy/               # systemd: stockbot(lynch-tw50) / stockbot-livermore / stockbot-lynch-mid100 /
-                      #          stockbot-discord-listen / stockbot-listen(Telegram,已停用)
+                      #          stockbot-discord-listen / stockbot-report(週報) / stockbot-listen(Telegram,已停用)
 ```
 
 ## 8. 給下一個 session 的提醒
@@ -193,3 +209,5 @@ deploy/               # systemd: stockbot(lynch-tw50) / stockbot-livermore / sto
   值得記的觀察：walkforward（樣本外）反而略有改善，與多頭期（樣本內）結論相反——
   但事前寫死的標準就是標準，不因為看到有利數字就改判。
 - 新策略一律先過三關再談部署。別急著上真錢。
+- **改策略邏輯前先問：這是 bug 還是策略改動？** bug（實盤與回測不一致）直接修；
+  策略改動一律先參數化、預設關閉、寫死標準後跑三關，通過才啟用。
