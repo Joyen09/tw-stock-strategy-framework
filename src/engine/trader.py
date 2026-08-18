@@ -3,7 +3,7 @@
 設計成「跑一次 = 掃一輪標的」，由外部排程器 (cron / APScheduler) 在盤中或收盤後觸發，
 而不是在程式內 while True，方便控制與除錯。
 
-安全預設：dry_run=True 只印出「會下什麼單」但不真的送出，確認無誤再關閉。
+安全預設：dy_run=True 只印出「會下什麼單」但不真的送出，確認無誤再關閉。
 """
 from __future__ import annotations
 
@@ -47,6 +47,7 @@ class LiveTrader:
         max_positions: int = 0,
         paused: bool = False,
         max_order_value: Optional[float] = None,
+        cooldown_days: int = 5,
     ):
         self.provider = provider
         self.broker = broker
@@ -66,9 +67,35 @@ class LiveTrader:
         # 大盤風向濾網：與回測一致，加權指數跌破年線時禁止做多。
         self.regime_filter = regime_filter
         self.regime_ma = regime_ma
+        # 賣出後 N 個交易日內不重買 (防洗盤)。回測 Backtester 預設就是 5，
+        # 實盤這邊過去漏掉了——等於實盤跑的不是回測驗證過的那套系統。0=關閉。
+        self.cooldown_days = cooldown_days
         # quote_fn(symbol) -> 即時價 (盤中用)，把今天這根 K 換成現價，讓突破/停損即時生效。
         self.quote_fn = quote_fn
         self.notifier = notifier
+
+    def _in_cooldown(self, symbol: str, df: pd.DataFrame) -> bool:
+        """這檔最近賣出後還沒過冷却期？用帳戶的成交紀錄判斷 (跨排程執行有效)。
+
+        交易日數以價格資料的索引計算，與回測「第幾根 K」的語意一致。
+        券商沒有成交紀錄 (例如 Shioaji) 時不阻擋，只是失去這層保護。
+        """
+        if self.cooldown_days <= 0:
+            return False
+        trades = getattr(self.broker, "trades", None)
+        if not trades:
+            return False
+        last_sell = None
+        for t in trades:
+            if t.get("symbol") == symbol and t.get("side") == "SELL":
+                last_sell = t.get("date")  # 紀錄按時間追加，最後一筆即最近一次
+        if not last_sell:
+            return False
+        try:
+            bars_after = (df.index > pd.Timestamp(last_sell)).sum()
+        except Exception:
+            return False
+        return bool(bars_after < self.cooldown_days)
 
     def _apply_realtime(self, df: pd.DataFrame, symbol: str, end: str) -> pd.DataFrame:
         """盤中用即時報價更新/補上「今天」這根 K，使日線策略能即時反應。"""
@@ -141,6 +168,8 @@ class LiveTrader:
 
             if sig.action == Action.BUY and pos is None:
                 if not bull_market:  # 大盤空頭，禁止做多 (與回測一致)
+                    continue
+                if self._in_cooldown(sym, df):  # 剛停損出場，冷却期內不追回 (與回測一致)
                     continue
                 budget = self.position_budget * sig.strength
                 shares = int(budget // price) if self.allow_odd_lot else int(budget // (price * LOT)) * LOT
