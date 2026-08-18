@@ -12,7 +12,8 @@ exit_buffer 讓賣出門檻降到季線下方 N%，形成緩衝區間。
 
 # 三關（沿用既有紀律）
 1. 多頭回測：近年多頭期，緩衝版要「不比現行差」
-2. 空頭壓測：含 2022 空頭，回撤不可惡化
+2. 空頭壓測：從多頭尾巴（2021-07）跨進 2022 空頭，回撤不可惡化；
+   空頭期 0 筆交易視為「沒測到」而非通過（空過會給出假的安全感）
 3. Walkforward：訓練期選股 → 測試期（沒看過的未來）驗證，防背答案
 
 用法（在 VM 上，.env 有 FINMIND_TOKEN）：
@@ -48,9 +49,12 @@ CRITERIA = {
     "require_fewer_trades": True,
 }
 
-# 期間設定（與過去三關驗證一致）
+# 期間設定
 BULL = ("2024-01-01", "2025-12-31")
-BEAR = ("2022-01-01", "2022-12-31")   # 台股 2022 空頭
+# 空頭期要從「多頭尾巴」起算：2026-08 第一版寫 2022-01-01 起，結果 0 筆交易——
+# 大盤濾網在 2022 全年都禁止做多，策略從頭空手到尾，那一關等於沒測到任何東西。
+# 從 2021-07 起算才會先建倉、再遇到 2022 下跌，出場規則的差異才驗得出來。
+BEAR = ("2021-07-01", "2022-12-31")
 WF_TRAIN = ("2023-01-01", "2024-06-30")
 WF_TEST = ("2024-07-01", "2025-12-31")
 
@@ -173,11 +177,20 @@ def main():
                        f"{r['bull'].total_return:+.2%} vs {base['bull'].total_return:+.2%}"))
         ok &= c
 
-        # 回撤是負值，「不惡化」= 不比基準更負（容忍 1pp 雜訊）
-        c = r["bear"].max_drawdown >= base["bear"].max_drawdown - CRITERIA["bear_dd_tolerance"]
-        checks.append(("關2 空頭回撤不惡化", c,
-                       f"{r['bear'].max_drawdown:.2%} vs {base['bear'].max_drawdown:.2%}"))
-        ok &= c
+        # 回撤是負值，「不惡化」= 不比基準更負（容忍 1pp 雜訊）。
+        # 但空頭期若根本沒交易，這一關是「沒測到」不是「通過」——空過比失敗更危險，
+        # 它會給出策略在空頭很穩的假象。沒交易一律當未通過並標明原因。
+        bear_traded = len(r["bear"].trades) > 0 and len(base["bear"].trades) > 0
+        if not bear_traded:
+            checks.append(("關2 空頭回撤不惡化", False,
+                           f"空頭期 0 筆交易 → 這一關沒測到（緩衝版 {len(r['bear'].trades)} 筆 / "
+                           f"基準 {len(base['bear'].trades)} 筆），不予採信"))
+            ok = False
+        else:
+            c = r["bear"].max_drawdown >= base["bear"].max_drawdown - CRITERIA["bear_dd_tolerance"]
+            checks.append(("關2 空頭回撤不惡化", c,
+                           f"{r['bear'].max_drawdown:.2%} vs {base['bear'].max_drawdown:.2%}"))
+            ok &= c
 
         wf = r["wf"]
         c = wf is not None and wf.sharpe >= CRITERIA["wf_min_sharpe"]
