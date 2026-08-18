@@ -26,6 +26,13 @@ RUNTIME_FILE = os.path.join(_ROOT, "runtime.json")
 
 DEFAULTS = {"budget": None, "max_positions": None, "paused": False}
 
+# 單一持股佔帳戶市值的兩段門檻。這些帳戶只持有 2~3 檔，三成本來就是正常配置，
+# 所以低門檻只在該筆後面標個佔比（純資訊），高門檻才另外拉一行示警。
+# 小帳戶買高價股特別容易踩到：預算 1 萬買 7 千多的股票只買得起 1 股，
+# 之後它一漲，整個帳戶的績效就等於那一股的績效。
+CONCENTRATION_NOTE = 0.30   # 標佔比
+CONCENTRATION_WARN = 0.50   # 一檔就超過帳戶一半 → 出警告
+
 
 def load_runtime() -> dict:
     """讀取執行期設定；檔案不存在或壞掉時回預設。"""
@@ -306,13 +313,15 @@ def _format_report(rows) -> str:
     if not rows:
         return "📭 尚無已建檔的模擬帳戶，還沒有績效可看。"
     lines = ["📊 模擬盤績效（市值計，最新收盤價）："]
-    tot_init = tot_mtm = 0.0
+    tot_init = tot_mtm = tot_unreal = 0.0
     any_estimated = False
+    concentrated = []
     # 各帳戶用「自己的起算日」對照大盤：晚開的帳戶不該被拿去比它沒參與的行情。
     benches = _taiex_returns_by_start([r.get("start_date") for r in rows])
     for r in rows:
         tot_init += r["initial"]
         tot_mtm += r["mtm"]
+        tot_unreal += r["unreal"]
         sign = "🟢" if r["ret"] >= 0 else "🔴"
         lines.append(f"【{r['label']}】{sign} 報酬 {r['ret']:+.2%}"
                      f"（市值 {r['mtm']:,.0f} / 初始 {r['initial']:,.0f}）")
@@ -323,19 +332,31 @@ def _format_report(rows) -> str:
                          f"（{r['start_date']} 起算）")
         for d in r["positions"]:
             mark = "" if d["priced"] else "⚠成本價"
+            # 單一持股佔比過高＝績效被一檔綁架，賺是運氣、賠是重傷。
+            w = (d["shares"] * d["last"] / r["mtm"]) if r["mtm"] > 0 else 0.0
+            if w >= CONCENTRATION_NOTE:
+                mark += f" 佔{w:.0%}"
+            if w >= CONCENTRATION_WARN:
+                concentrated.append((r["label"], d["symbol"], w))
             lines.append(f"　{d['symbol']} {d['shares']}股：{d['pnl']:+,.0f} 元 "
                          f"(現 {d['last']:.1f} / 成本 {d['avg']:.1f}){mark}")
             if not d["priced"]:
                 any_estimated = True
         if not r["positions"]:
             lines.append("　(無持倉，全現金)")
-        lines.append(f"　現金 {r['cash']:,.0f}｜未實現損益 {r['unreal']:+,.0f}")
+        # 已實現 = 市值 − 初始 − 未實現（含已付手續費與證交稅）。
+        # 分開看才知道虧的是「已經砍掉的」還是「帳面上的」——兩者意義完全不同。
+        realized = r["mtm"] - r["initial"] - r["unreal"]
+        lines.append(f"　現金 {r['cash']:,.0f}｜未實現 {r['unreal']:+,.0f}"
+                     f"｜已實現 {realized:+,.0f}")
     tot_ret = (tot_mtm / tot_init - 1) if tot_init > 0 else 0.0
-    tot_unreal = tot_mtm - tot_init
+    tot_pnl = tot_mtm - tot_init
+    tot_realized = tot_pnl - tot_unreal
     tsign = "🟢" if tot_ret >= 0 else "🔴"
     lines.append(f"━━━━━━━━━━")
-    lines.append(f"💰 三帳戶合計 {tsign} {tot_ret:+.2%}"
-                 f"（市值 {tot_mtm:,.0f} / 初始 {tot_init:,.0f}｜損益 {tot_unreal:+,.0f}）")
+    lines.append(f"💰 {len(rows)} 帳戶合計 {tsign} {tot_ret:+.2%}"
+                 f"（市值 {tot_mtm:,.0f} / 初始 {tot_init:,.0f}｜損益 {tot_pnl:+,.0f}）")
+    lines.append(f"　已實現 {tot_realized:+,.0f}｜未實現 {tot_unreal:+,.0f}")
     # 合計的大盤對照用最早起算日（涵蓋整個空跑期間）。
     starts = [r["start_date"] for r in rows if r.get("start_date")]
     if starts:
@@ -344,12 +365,18 @@ def _format_report(rows) -> str:
             diff = tot_ret - bench
             vs = "🟢 領先大盤" if diff >= 0 else "🔴 落後大盤"
             lines.append(f"📈 同期大盤 (TAIEX) {bench:+.2%}｜{vs} {diff:+.2%}")
-            # 空頭時「少賠」有一部分只是因為手上有現金、沒滿倉，不全是選股功勞。
             cash = sum(r["cash"] for r in rows)
-            if tot_mtm > 0 and bench < 0:
+            if tot_mtm > 0:
                 pos_ratio = 1 - cash / tot_mtm
-                lines.append(f"　（持股水位 {pos_ratio:.0%}、現金 {cash:,.0f}；"
-                             f"空頭少賠有一部分來自沒滿倉，非全是選股）")
+                note = f"　（持股水位 {pos_ratio:.0%}、現金 {cash:,.0f}"
+                # 只有真的抱著一堆現金時，「少賠」才有一部分是配置而非選股功勞。
+                if bench < 0 and pos_ratio < 0.85:
+                    note += "；空頭少賠有一部分來自沒滿倉，非全是選股"
+                lines.append(note + "）")
+    # 單一持股綁架整個帳戶時要講白：這種領先大盤是集中押注的結果，不是穩定實力。
+    for label, sym, w in concentrated:
+        lines.append(f"⚠️ 【{label}】{sym} 佔該帳戶 {w:.0%}——績效被單一持股主導，"
+                     f"它漲是運氣、跌會重傷")
     if any_estimated:
         lines.append("⚠標記者抓不到最新價，暫用成本價（顯示 0 損益）")
     lines.append("ℹ️ 樣本期間短，數字仍多為市場波動、參考即可；重點看長期與回撤。")
