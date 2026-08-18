@@ -10,6 +10,13 @@
 
 林區重視「趨勢仍在」，所以加一個技術濾網：股價在季線 (60MA) 之上。
 賣出：成長動能消失 (PEG 失效或營收轉負) 或跌破季線。
+
+exit_buffer（季線緩衝）：
+買在季線之上、跌破季線就賣，兩個門檻緊貼著 —— 股價在季線附近震盪時會一直
+買→賣→買→賣。2026-08 實盤就出現「台積電抱 2 天被砍」(-4.3%) 的案例。
+緩衝讓賣出門檻降到季線下方 N%，形成遲滯區間 (hysteresis)。
+**預設 0.0 = 維持原行為**；要改預設值前必須先過三關驗證
+(tools/validate_lynch_buffer.py)，不可憑感覺調。
 """
 from __future__ import annotations
 
@@ -29,6 +36,7 @@ class LynchStrategy(Strategy):
         max_growth=50.0,
         max_debt_ratio=60.0,
         ma_window=60,
+        exit_buffer=0.0,  # 季線緩衝；0.0=原行為 (見模組 docstring)
     )
 
     def __init__(self, **params):
@@ -45,7 +53,11 @@ class LynchStrategy(Strategy):
         close = ctx.prices["close"]
         ma = ind.sma(close, p["ma_window"]).iloc[-1]
         price = close.iloc[-1]
-        above_ma = price >= ma if ma == ma else False
+        has_ma = ma == ma  # NaN 檢查：資料不足時季線算不出來
+        above_ma = price >= ma if has_ma else False
+        # 出場門檻比進場低 exit_buffer，中間形成遲滯區間，股價貼著季線震盪時不會來回洗。
+        exit_line = ma * (1 - p["exit_buffer"]) if has_ma else float("nan")
+        broke_ma = price < exit_line if has_ma else False
 
         checks = {
             "PEG<=1.2": peg is not None and 0 < peg <= p["max_peg"],
@@ -59,10 +71,12 @@ class LynchStrategy(Strategy):
         peg_txt = f"{peg:.2f}" if peg is not None else "N/A"
 
         held = ctx.position is not None and ctx.position.shares > 0
-        if held and (score < 0.5 or not above_ma):
+        if held and (score < 0.5 or broke_ma):
+            buf = p["exit_buffer"]
+            line = f"季線-{buf:.0%}" if buf > 0 else "季線"
             return self._signal(
                 Action.SELL, 1.0,
-                f"成長動能轉弱 (PEG={peg_txt}) 或跌破季線，出場",
+                f"成長動能轉弱 (PEG={peg_txt}) 或跌破{line}，出場",
                 ctx.symbol,
             )
 
