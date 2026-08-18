@@ -1,4 +1,4 @@
-"""實盤掃描的冷却期：賣出後 N 個交易日內不重買（回測本來就有，實盤過去漏了）。"""
+"""實盤掃描的冷卻期：賣出後 N 個交易日內不重買（回測本來就有，實盤過去漏了）。"""
 import pandas as pd
 import pytest
 
@@ -9,7 +9,7 @@ from src.models import Action, Signal
 
 
 class _AlwaysBuy:
-    """永遠喊買，用來檢驗冷却期有沒有真的擋住。"""
+    """永遠喊買，用來檢驗冷卻期有沒有真的擋住。"""
     name = "always_buy"
     requires_fundamentals = False
     min_bars = 1
@@ -48,14 +48,14 @@ def _trader(broker, provider, cooldown=5):
 
 
 def test_no_rebuy_within_cooldown(tmp_path, prices):
-    """剛賣掉就再喊買時，冷却期內要擋下來（不然就是一直來回洗）。"""
+    """剛賣掉就再喊買時，冷卻期內要擋下來（不然就是一直來回洗）。"""
     b = PersistentPaperBroker(path=str(tmp_path / "p.json"), cash=100_000)
     b.place_order(Order("2330", OrderSide.BUY, 10, 100.0, "先建倉"))
     b.place_order(Order("2330", OrderSide.SELL, 10, 100.0, "停損"))
     b.trades[-1]["date"] = "2026-08-12"  # 賣在倒數第 2 個交易日
 
     plans = _trader(b, _Provider(prices)).scan(["2330"], "2026-08-18")
-    assert plans == []  # 冷却期內，不該有買單
+    assert plans == []  # 冷卻期內，不該有買單
 
 
 def test_rebuy_allowed_after_cooldown(tmp_path, prices):
@@ -79,7 +79,7 @@ def test_cooldown_zero_disables_the_guard(tmp_path, prices):
 
 
 def test_cooldown_only_blocks_the_sold_symbol(tmp_path, prices):
-    """冷却是針對「剛賣掉的那一檔」，不該波及其他股票。"""
+    """冷卻是針對「剛賣掉的那一檔」，不該波及其他股票。"""
     b = PersistentPaperBroker(path=str(tmp_path / "p.json"), cash=100_000)
     b.place_order(Order("2330", OrderSide.BUY, 10, 100.0, "先建倉"))
     b.place_order(Order("2330", OrderSide.SELL, 10, 100.0, "停損"))
