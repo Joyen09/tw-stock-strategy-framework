@@ -81,6 +81,7 @@ class DiskCachingProvider(DataProvider):
         self._mem_f: dict = {}
         self._mem_b: dict = {}
         self._mem_i: dict = {}
+        self._mem_ca: dict = {}  # 除權息事件（同一次執行內重查免打 API）
 
     # --- 內部工具 ---
 
@@ -173,6 +174,23 @@ class DiskCachingProvider(DataProvider):
             data = self.inner.institutional(symbol, start, end)
             self._save(self._path(slug), self._NONE if data is None else data)
         self._mem_i[key] = data
+        return data
+
+    def corporate_actions(self, symbol: str, start: str, end: str) -> list:
+        """除權息事件。TTL 同 history (1 天)：一天查一次夠了，除權息不會盤中冒出來。
+        內層 provider 沒有這個方法（例如樣本資料）時回空清單，不讓排程掛掉。"""
+        inner = getattr(self.inner, "corporate_actions", None)
+        if inner is None:
+            return []
+        key = (symbol, start, end)
+        if key in self._mem_ca:
+            return self._mem_ca[key]
+        slug = f"ca_{symbol}_{start}_{end}".replace("-", "")
+        cached = self._load(self._path(slug), self._h_ttl)
+        data = cached if cached is not None else inner(symbol, start, end)
+        if cached is None:
+            self._save(self._path(slug), data)
+        self._mem_ca[key] = data
         return data
 
     def universe(self):

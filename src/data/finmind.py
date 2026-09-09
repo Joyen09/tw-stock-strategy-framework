@@ -170,6 +170,15 @@ class FinMindProvider(DataProvider):
 
         return f
 
+    def corporate_actions(self, symbol: str, start: str, end: str) -> list:
+        """該檔在期間內的除權息事件（給模擬帳調整股數/現金用）。
+
+        不處理的話，除權那天股價機械性腰斬會被當成暴跌觸發停損——
+        2026-09 緯穎 6669 就這樣被誤砍（詳見 src/data/corporate_actions.py）。
+        """
+        from .corporate_actions import fetch
+        return fetch(self.api, symbol, start, end)
+
     def institutional(self, symbol: str, start: str, end: str) -> Optional[pd.DataFrame]:
         """三大法人每日買賣超 (股)。欄位 trust_net=投信、foreign_net=外資 (含外資自營)。
 

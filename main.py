@@ -317,6 +317,21 @@ def cmd_scan(args):
         broker = PaperBroker(cash=args.cash)
         dry_run = not args.live
 
+    # 除權息調整：必須在跑策略「之前」做，否則除權那天的機械性跌價會被當成暴跌觸發停損
+    # (2026-09 緯穎 6669 就這樣被誤砍，會計誤差 4,398 元)。只對本地模擬帳有意義。
+    if args.paper and hasattr(broker, "apply_corporate_actions"):
+        held = [p.symbol for p in broker.positions() if p.shares > 0]
+        if held:
+            from datetime import timedelta
+            ca_start = (date.fromisoformat(end) - timedelta(days=90)).isoformat()
+            actions = []
+            for sym in held:
+                try:
+                    actions += provider.corporate_actions(sym, ca_start, end)
+                except Exception as e:  # 抓不到就照常跑，只是少了這層保護
+                    print(f"[ca] {sym} 除權息查詢略過：{e}")
+            broker.apply_corporate_actions(actions)
+
     # 執行期設定 (Telegram /budget /maxpos /pause 動態覆寫)
     from src.control import load_runtime
     rc = load_runtime()

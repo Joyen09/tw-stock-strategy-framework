@@ -60,6 +60,7 @@ class PersistentPaperBroker(PaperBroker):
         self.initial_cash = self.account.cash
         self.start_date = None  # 帳戶起算日 (算「同期大盤報酬」對照用)；舊檔沒存就下次存檔補今天
         self.trades = []  # 成交紀錄 (跨執行持久化)；沒有它就無法回答「錢是怎麼虧的」
+        self.last_ca_date = None  # 除權息處理到哪一天 (冪等用，見 apply_corporate_actions)
         if not os.path.exists(self.path):
             return  # 首次執行：用建構子的初始 cash、空持倉
         try:
@@ -86,6 +87,7 @@ class PersistentPaperBroker(PaperBroker):
         # 舊帳戶檔沒存過就維持 None，report 不硬湊大盤對照 (窗口對不齊會誤導)。
         self.start_date = _valid_date(data.get("start_date"))
         self.trades = list(data.get("trades", []))
+        self.last_ca_date = data.get("last_ca_date")
 
     def _save(self) -> None:
         data = {
@@ -98,6 +100,7 @@ class PersistentPaperBroker(PaperBroker):
                 if p.shares > 0
             ],
             "trades": getattr(self, "trades", [])[-MAX_TRADES:],
+            "last_ca_date": getattr(self, "last_ca_date", None),
         }
         # 原子寫入：先寫暫存檔再 rename，避免排程當中被中斷寫壞檔案。
         tmp = self.path + ".tmp"
@@ -119,6 +122,52 @@ class PersistentPaperBroker(PaperBroker):
             self._record_trade(result, avg_before)
         self._save()  # 每次下單後落地，跨執行不遺失
         return result
+
+    def apply_corporate_actions(self, actions) -> list:
+        """套用除權息到持倉（配股調股數、配息入現金），回傳已套用的說明清單。
+
+        冪等：帳戶記住處理到哪一天（last_ca_date），比它舊的事件一律跳過，
+        排程每天跑也不會重複調整。沒有這層處理，除權那天的機械性跌價會被
+        當成暴跌觸發停損——2026-09 緯穎 6669 就這樣被誤砍，會計誤差 4,398 元。
+        """
+        from ..data.corporate_actions import apply_to_position
+
+        applied = []
+        last = getattr(self, "last_ca_date", None) or ""
+        newest = last
+        for a in sorted(actions, key=lambda x: x.date):
+            if a.date <= last:
+                continue  # 之前處理過了
+            newest = max(newest, a.date)
+            if a.kind == "unknown":
+                print(f"[ca] ⚠️ {a.symbol} {a.date} 未處理：{a.note}")
+                continue
+            pos = self.account.positions.get(a.symbol)
+            if pos is None or pos.shares <= 0:
+                continue  # 沒持有就與我們無關
+            res = apply_to_position(pos.shares, pos.avg_price, a)
+            if res is None:
+                continue
+            new_shares, new_avg, cash = res
+            old = (pos.shares, pos.avg_price)
+            pos.shares, pos.avg_price = new_shares, new_avg
+            self.account.cash += cash
+            desc = (f"{a.symbol} {a.date} 除{'權' if a.kind == 'stock' else '息'}："
+                    f"{old[0]}股@{old[1]:.2f} → {new_shares}股@{new_avg:.2f}"
+                    f"，入帳現金 {cash:,.0f}")
+            applied.append(desc)
+            print(f"[ca] ✅ {desc}")
+            if not hasattr(self, "trades"):
+                self.trades = []
+            self.trades.append({
+                "date": a.date, "symbol": a.symbol, "side": "CORP_ACTION",
+                "shares": new_shares, "price": float(a.after_price),
+                "reason": desc, "cash": round(cash, 2),
+            })
+        if newest and newest != last:
+            self.last_ca_date = newest
+            self._save()
+        return applied
 
     def _record_trade(self, order: Order, avg_before: float) -> None:
         """把成交寫進持久化紀錄。賣出時一併算實現損益 (已扣賣出手續費與證交稅)。
