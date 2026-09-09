@@ -53,7 +53,7 @@ def test_stock_dividend_keeps_total_cost():
     """配股：股數變多、均價等比例下調，總成本不變——停損線才會跟著調整。"""
     a = classify(7800.0, 2614.99, "權", "6669")
     shares, avg, cash = apply_to_position(1, 5925.0, a)
-    assert shares == 2                       # 1 × 2.983 = 2.98 → 2 股 + 畸零折現
+    assert shares == 2                       # 1 × 2.983 = 2.98 → 2 股 + 零頭折現
     assert cash == pytest.approx(0.983 * 2614.99, rel=0.02)
     assert shares * avg == pytest.approx(1 * 5925.0)   # 總成本守恆
 
