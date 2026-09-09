@@ -115,7 +115,7 @@ def apply_to_position(shares: int, avg_price: float, action: CorporateAction
                       ) -> Optional[tuple]:
     """把一次除權息套用到持倉，回傳 (新股數, 新均價, 入帳現金)；不該處理就回 None。
 
-    配股：股數乘以配股比例（取整，畸零股折現金，與實務一致）、均價等比例下調，
+    配股：股數乘以配股比例（取整，不足 1 股的零頭折現金，與實務一致）、均價等比例下調，
           總成本不變 —— 這樣停損線才會跟著調整，不會被機械性跌價誤觸發。
     配息：股數不變，現金入帳；均價扣掉每股股利（維持「成本基礎」與市價同基準）。
     """
@@ -128,7 +128,7 @@ def apply_to_position(shares: int, avg_price: float, action: CorporateAction
             return None
         total = shares * ratio
         new_shares = int(total)
-        frac_cash = (total - new_shares) * action.after_price  # 畸零股折現金
+        frac_cash = (total - new_shares) * action.after_price  # 不足 1 股的零頭折現金
         if new_shares <= 0:
             return None
         new_avg = shares * avg_price / new_shares  # 總成本不變
