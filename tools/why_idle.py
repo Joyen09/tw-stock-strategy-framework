@@ -32,6 +32,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src import strategies                                   # noqa: E402
+from src.broker import fees                                  # noqa: E402
 from src.broker.persistent_paper import PersistentPaperBroker  # noqa: E402
 from src.engine.trader import LiveTrader                     # noqa: E402
 from src.models import Action                                # noqa: E402
@@ -175,7 +176,9 @@ def main(argv=None) -> int:
             elif int((budget * sig.strength) // price) <= 0:
                 buckets[f"有買訊號但預算買不起 1 股（{price:,.0f} 元）"].append(sym)
             else:
-                buy_ready.append((sig.strength, sym, price, sig.reason))
+                shares = int((budget * sig.strength) // price)
+                buy_ready.append((sig.strength, sym, price, shares,
+                                  fees.buy_cost(shares * price), sig.reason))
         elif sig.action == Action.BUY and pos is not None:
             buckets["已持有（買訊號不重複加碼）"].append(sym)
         elif sig.action == Action.SELL and pos is not None:
@@ -187,11 +190,28 @@ def main(argv=None) -> int:
         head = "、".join(syms[:8]) + ("…" if len(syms) > 8 else "")
         print(f"   {len(syms):>3} 檔　{reason}：{head}")
 
-    buy_ready.sort(reverse=True)
+    buy_ready.sort(key=lambda x: (-x[0], x[1]))
+    cash = broker.cash()
     print(f"\n   通過所有檢查、排隊等買進的：{len(buy_ready)} 檔")
-    for s, sym, price, reason in buy_ready[:10]:
-        take = "→ 會買進" if (not paused and slots > 0) else "→ 但沒有空位/暫停中，買不到"
-        print(f"     {sym} @ {price:,.2f}（強度 {s:.2f}）{take}　{reason}")
+    for s, sym, price, shares, cost, reason in buy_ready[:10]:
+        if paused or slots <= 0:
+            take = "→ 但沒有空位/暫停中，買不到"
+        elif cost > cash:
+            take = f"→ ⚠️ 現金不足（要 {cost:,.0f}，只有 {cash:,.0f}），會靜默不成交"
+        else:
+            take = "→ 會買進"
+        print(f"     {sym} {shares} 股 @ {price:,.2f}（強度 {s:.2f}）{take}")
+
+    # 資金關卡：下單金額算的是 budget×強度，不會縮到「現有現金」，
+    # 買不起就整筆不成交（見 broker/paper.py），而且不會出現在心跳訊息裡。
+    affordable = [b for b in buy_ready if b[4] <= cash]
+    if buy_ready:
+        print(f"\n   其中現金買得起的：{len(affordable)} / {len(buy_ready)} 檔"
+              f"（現金 {cash:,.0f}，單筆下單金額 = budget {budget:,.0f} × 訊號強度）")
+        if not affordable:
+            print("   ⛔ 一檔都買不起：買單是「全有全無」，金額超過現金就整筆不成交，")
+            print("      而且失敗不會出現在心跳訊息裡（看起來就只是「無交易訊號」）。")
+            blockers.append(f"現金不足（{cash:,.0f}）買不起任何一檔")
 
     print(f"\n⑤ 手上 {len(holdings)} 檔為什麼不賣（賣出不受濾網/空位限制）")
     if not holdings:
