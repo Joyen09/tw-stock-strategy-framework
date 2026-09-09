@@ -143,6 +143,12 @@ SHIOAJI_PERSON_ID=<你的身分證字號>   # 實際值只放 VM 的 .env，勿�
     事件日當天已平均漲 +0.67%（進場前就被反映），事後 1/5/10/20 日全部**輸給隨機日基準**
     （-0.85%/-2.22%/-3.32%/-4.35%）。→ 新聞看板只當**風險雷達/理解工具**，不當買進訊號。
     工具留存：`tools/news_event_study.py`。
+21. **「都沒在交易」通常不是壞掉，是滿倉**：lynch-mid100 從頭到尾 0 筆成交，原因是
+    `--max-positions 2` 而且已持有 2 檔 → `slots = 2 - 2 = 0`，`buy_cands[:0]` 是空的，
+    結構上就買不進；兩檔持股又都沒觸發賣出條件，所以一直卡住。心跳只會說「無交易訊號」，
+    分不出是「沒訊號」還是「輪不到評估」。→ `tools/why_idle.py` 會照 scan() 的順序把
+    暫停／大盤濾網／空位／冷卻期／訊號逐關檢查，直接指出卡在哪一關。
+    （附帶觀察：這個交易最少的帳戶報酬最好，而交易最多的 livermore 虧最多。）
 
 ## 5. 下一步
 
@@ -169,6 +175,8 @@ python main.py listen --paper --paper-file "lynch=paper_account.json,livermore=p
 python main.py shioaji-test                           # 測 Shioaji 連線
 python main.py notify-test                            # 測通知（Telegram+Discord 都會發）
 python tools/validate_lynch_buffer.py --universe tw50 # 策略參數改動的三關驗證（標準事前寫死）
+python tools/churn_check.py                           # 交易品質健檢（來回洗、持有天數、勝率）
+python tools/why_idle.py --strategy lynch --universe mid100 --paper-file paper_lynch_mid100.json --regime --max-positions 2 --budget 10000   # 帳戶為什麼沒交易
 ```
 ⚠️ VM 上要用 `.venv/bin/python`，系統沒有裸 `python`。
 控制指令（Discord 用 / 或 ! 前綴）：`/status /budget N /maxpos N /pause /resume /holdings /report /trades /sell 2330 /sell all`
