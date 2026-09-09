@@ -147,17 +147,25 @@ def main():
         after = [t for t in all_trades if t["date"] >= COOLDOWN_FIX_DATE]
         print("=" * 60)
         print(f"cooldown 修正（{COOLDOWN_FIX_DATE}）前後對照：")
+        # 觀察窗口要用「日曆上真正經過的時間」，不能用「第一筆到最後一筆的間距」——
+        # 只有 1 筆成交時後者會算成 1 天，換算出每週 7 筆的荒謬數字（原本就踩過這個坑）。
+        log_start = min(t["date"] for t in all_trades)
+        today = dt.date.today().isoformat()
+        windows = {
+            "修正前": (log_start, min(COOLDOWN_FIX_DATE, today)),
+            "修正後": (COOLDOWN_FIX_DATE, today),
+        }
         for tag, group in (("修正前", before), ("修正後", after)):
-            if not group:
-                print(f"  {tag}：無資料")
+            w0, w1 = windows[tag]
+            days = (dt.date.fromisoformat(w1) - dt.date.fromisoformat(w0)).days
+            if days <= 0:
+                print(f"  {tag}：窗口不足，跳過")
                 continue
-            days = (dt.date.fromisoformat(max(t["date"] for t in group))
-                    - dt.date.fromisoformat(min(t["date"] for t in group))).days + 1
-            weeks = max(days / 7, 0.1)
-            print(f"  {tag}：{len(group)} 筆成交 / {days} 天 = 每週 {len(group)/weeks:.1f} 筆"
-                  f"（{min(t['date'] for t in group)} ~ {max(t['date'] for t in group)}）")
+            weeks = days / 7
+            print(f"  {tag}：{len(group)} 筆成交 / {days} 天（{w0} ~ {w1}）"
+                  f" = 每週 {len(group)/weeks:.1f} 筆")
         print()
-        print("⚠️ 兩段期間都很短，週均筆數只能看方向、不能當統計結論；")
+        print("⚠️ 兩段期間都很短、筆數個位數，週均只能看方向、不能當統計結論；")
         print("   而且行情本身會影響交易頻率（盤整多訊號、單邊少訊號），不是只有 cooldown 的功勞。")
     else:
         print("=" * 60)
