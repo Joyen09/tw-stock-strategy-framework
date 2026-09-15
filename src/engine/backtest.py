@@ -6,6 +6,10 @@
 3. 記錄每日總資產，最後計算績效指標。
 
 資金控管 (簡化版)：每檔股票最多投入 position_pct 的「初始資金」，整張 (1000 股) 為單位。
+
+暖身 (warmup)：指標 (季線、年線) 需要前置資料，這些資料一律從 start「之前」另外抓，
+不從回測窗口裡扣 —— 否則標示的期間與實際交易的期間會不一致，短窗口甚至整段空過
+(2026-09 修正，見 run() 內註解與 tests/test_backtest_warmup.py)。
 """
 from __future__ import annotations
 
@@ -92,7 +96,7 @@ class Backtester:
         initial_cash: float = 1_000_000.0,
         position_pct: float = 0.2,
         fee_discount: float = 0.28,
-        warmup: int = 250,
+        warmup: int = 250,  # 往 start 之前「多抓」幾根供指標暖身 (不吃掉回測期間)
         allow_odd_lot: bool = True,
         cooldown_days: int = 5,
         regime_filter: bool = False,
@@ -124,7 +128,19 @@ class Backtester:
     ) -> BacktestResult:
         broker = PaperBroker(cash=self.initial_cash, fee_discount=self.fee_discount)
 
-        data: Dict[str, pd.DataFrame] = {s: self.provider.history(s, start, end) for s in symbols}
+        # 暖身資料要從 start「之前」另外抓，不可以吃掉回測期間本身。
+        #
+        # 2026-09 發現的嚴重錯誤：舊版是 `if i < warmup: continue`，warmup 直接從
+        # 回測窗口的頭 250 根扣掉 —— 標示 2024-01-01 起的回測，實際上 2024-12 才開始
+        # 交易，憑空少了一年。窗口越短影響越大：18 個月的空頭壓測只剩最後 6 個月
+        # 在交易(2022-07 之後)，而那時大盤早已跌破年線、風向濾網全面禁止做多，
+        # 於是「空頭壓測 0 筆交易」—— 一直被當成測不出東西，其實是窗口被吃掉了。
+        # 多抓的天數用日曆天估：250 個交易日 ≈ 365 天，抓寬一點不會錯。
+        warm_days = int(self.warmup * 1.55) + 45
+        fetch_start = (pd.Timestamp(start) - pd.Timedelta(days=warm_days)).strftime("%Y-%m-%d")
+        start_ts = pd.Timestamp(start)
+
+        data: Dict[str, pd.DataFrame] = {s: self.provider.history(s, fetch_start, end) for s in symbols}
         # 只有需要基本面的策略才抓財報，省 FinMind 呼叫次數 (技術面策略免抓)。
         funds = {}
         if getattr(strategy, "requires_fundamentals", False):
@@ -132,8 +148,8 @@ class Backtester:
         # 籌碼 (三大法人買賣超)：只有籌碼類策略才抓。
         chips_all: Dict[str, Optional[pd.DataFrame]] = {}
         if getattr(strategy, "requires_chips", False):
-            chips_all = {s: self.provider.institutional(s, start, end) for s in symbols}
-        bench_full = self.provider.benchmark(start, end)
+            chips_all = {s: self.provider.institutional(s, fetch_start, end) for s in symbols}
+        bench_full = self.provider.benchmark(fetch_start, end)
         # TAIEX 抓不到 (逾時/限額) 但要用風向濾網時，用選股池等權平均自建大盤代理，
         # regime 照常運作、且完全不需額外 API 請求 (資料已在手)。
         if self.regime_filter and bench_full is None:
@@ -154,9 +170,8 @@ class Backtester:
         cooldown_until: Dict[str, int] = {}  # 每檔賣出後，到第幾根才可再買
 
         for i, date in enumerate(all_dates):
-            if i < self.warmup:
-                equity.append((date, self._equity(broker, data, date)))
-                continue
+            if date < start_ts:
+                continue  # 暖身期：只餵指標用的歷史，不交易、也不計入權益曲線
 
             for sym in symbols:
                 df = data[sym]
