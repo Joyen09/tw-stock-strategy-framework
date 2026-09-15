@@ -358,10 +358,18 @@ def cmd_scan(args):
     mode = "本地模擬盤(假錢)" if args.paper else ("實單" if args.live else "DRY-RUN (未送單)")
     rt = " +即時報價" if quote_fn else ""
     print(f"\n=== 掃描結果 [{mode}{rt}]：{args.strategy} @ {end} ===")
+    rejected = getattr(trader, "rejected", [])
     if not plans:
-        print("本輪無交易訊號。")
+        # 「沒訊號」和「有訊號但送不出去」是兩回事，不可混為一談 (見 trader._heartbeat)
+        print("本輪無交易訊號。" if not rejected else "本輪沒有成交（有訊號但下不出去，見下方）。")
     for p in plans:
         print(f"  {p.action:<4} {p.symbol} {p.shares:>6} 股 @ {p.price:>8.2f}  {p.reason}")
+    if rejected:
+        print(f"\n⚠️ {len(rejected)} 筆未成交：")
+        for r in rejected:
+            print(f"  {r}")
+        print("　（買單是全有全無：金額超過帳上現金就整筆不成交，"
+              "下單金額算的是 budget×訊號強度，不會自動縮到剩餘現金）")
     if notifier and notifier.enabled and plans:
         if getattr(trader, "last_notify_ok", False):
             print(f"（已推送 {len(plans)} 筆訊號到 Telegram）")

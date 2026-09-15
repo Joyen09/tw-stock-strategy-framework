@@ -73,6 +73,10 @@ class LiveTrader:
         # quote_fn(symbol) -> 即時價 (盤中用)，把今天這根 K 換成現價，讓突破/停損即時生效。
         self.quote_fn = quote_fn
         self.notifier = notifier
+        # 本輪被拒絕/未成交的單 (每次 scan 重置)。沒有這個，資金不足的買單會靜默失敗：
+        # 訂單沒成交就不進 plans，心跳只會說「無交易訊號」，跟「策略真的沒看上任何股票」
+        # 長得一模一樣。2026-09 lynch-mid100 就是這樣卡了很久沒人發現。
+        self.rejected: List[str] = []
 
     def _in_cooldown(self, symbol: str, df: pd.DataFrame) -> bool:
         """這檔最近賣出後還沒過冷卻期？用帳戶的成交紀錄判斷 (跨排程執行有效)。
@@ -130,6 +134,7 @@ class LiveTrader:
 
     def scan(self, symbols: List[str], end: str) -> List[TradePlan]:
         """掃描標的，回傳本輪要執行的交易計畫 (並視 dry_run 決定是否真的送單)。"""
+        self.rejected = []  # 每輪重算，不累積上一輪的
         start = (pd.Timestamp(end) - pd.Timedelta(days=self.lookback_days * 2)).strftime("%Y-%m-%d")
         bench = self.provider.benchmark(start, end)
         plans: List[TradePlan] = []
@@ -198,22 +203,51 @@ class LiveTrader:
         self.last_notify_ok = self._notify(plans, end)
         return plans
 
+    def _reject(self, plan: TradePlan, reason: str) -> None:
+        """記下並印出「這筆單沒送出去/沒成交」，讓失敗看得見。
+
+        被拒的單不會進 plans，所以不記下來的話它在通知裡完全不存在——
+        使用者只會看到「無交易訊號」，誤以為策略沒看上任何股票。
+        """
+        notional = plan.shares * plan.price
+        detail = (f"{plan.action} {plan.symbol} {plan.shares} 股 @ {plan.price:,.2f}"
+                  f"（{notional:,.0f} 元）：{reason}")
+        self.rejected.append(detail)
+        print(f"[order] ⚠️ 未成交 {detail}")
+
     def _execute(self, plan: TradePlan) -> bool:
         """執行下單；回傳是否真的成交 (dry-run 視為假設成立)。"""
         # 保險絲：買單金額異常放大時拒單 (賣出是出清持倉、金額本來就可能大，不設限)。
         if plan.action == "BUY" and self.max_order_value > 0:
             notional = plan.shares * plan.price
             if notional > self.max_order_value:
-                print(f"[safety] ⛔ 拒絕 {plan.symbol} 買單：金額 {notional:,.0f} 超過單筆上限 "
-                      f"{self.max_order_value:,.0f}（股數={plan.shares} @ {plan.price:.2f}）")
                 plan.sent = False
+                self._reject(plan, f"超過單筆金額上限 {self.max_order_value:,.0f}（保險絲）")
                 return False
         if self.dry_run:
             return True
         side = OrderSide.BUY if plan.action == "BUY" else OrderSide.SELL
         order = self.broker.place_order(Order(plan.symbol, side, plan.shares, plan.price, plan.reason))
         plan.sent = bool(getattr(order, "filled", False))
+        if not plan.sent:
+            self._reject(plan, self._reject_reason(plan, order))
         return plan.sent
+
+    def _reject_reason(self, plan: TradePlan, order) -> str:
+        """從券商回報推出未成交原因；資金不足時補上「差多少」才看得出要加多少錢。"""
+        note = (getattr(order, "note", "") or "")
+        # PaperBroker 把原因接在原本的理由後面 (" | 資金不足，未成交")，取最後一段就好。
+        reason = note.rsplit("|", 1)[-1].strip() if "|" in note else "券商未回報成交"
+        reason = reason.replace("，未成交", "")  # 前綴已經說「未成交」了，不重複
+        if plan.action == "BUY" and "資金不足" in reason:
+            try:
+                cash = self.broker.cash()
+            except Exception:
+                return reason
+            # 下單金額算的是 budget×訊號強度，不會自動縮到剩餘現金，所以買單是「全有全無」。
+            return (f"{reason}（需約 {plan.shares * plan.price:,.0f}，"
+                    f"帳上現金 {cash:,.0f}）")
+        return reason
 
     def _notify(self, plans: List[TradePlan], end: str) -> bool:
         """有訊號推交易明細；無訊號推一行「心跳」。回傳是否成功送出。
@@ -235,17 +269,37 @@ class LiveTrader:
             # 理由含 PEG<=1.2、>0 等 < > 符號，HTML 模式須跳脫，否則 Telegram 回 400。
             reason = html.escape(p.reason)
             lines.append(f"{emoji} <b>{html.escape(p.symbol)}</b> {p.shares}股 @ {p.price:.2f}\n　{reason}")
+        lines += self._rejected_lines()
         return self.notifier.send("\n".join(lines))
 
+    def _rejected_lines(self, limit: int = 3) -> List[str]:
+        """未成交明細 (最多 limit 筆)，附在通知末尾。沒有就回空清單。"""
+        if not self.rejected:
+            return []
+        import html
+
+        out = [f"⚠️ <b>{len(self.rejected)} 筆未成交</b>"]
+        out += [f"　{html.escape(r)}" for r in self.rejected[:limit]]
+        if len(self.rejected) > limit:
+            out.append(f"　…另外 {len(self.rejected) - limit} 筆")
+        return out
+
     def _heartbeat(self, end: str) -> bool:
-        """無訊號時的一行心跳：證明掃描有跑完，並揭露暫停狀態/持倉/現金。"""
+        """無訊號時的一行心跳：證明掃描有跑完，並揭露暫停狀態/持倉/現金。
+
+        有單被拒時**不能**說「無交易訊號」——那是兩件完全不同的事：
+        前者是策略沒看上任何股票，後者是策略選好了但送不出去（例如現金不夠）。
+        講錯會讓一個買不進東西的帳戶看起來一切正常。
+        """
         held = len([p for p in self.broker.positions() if p.shares > 0])
         try:
             cash = f"{self.broker.cash():,.0f}"
         except Exception:
             cash = "?"
         state = "⏸ 暫停買進中" if self.paused else "運作正常"
-        return self.notifier.send(
-            f"🫀 {self.strategy.name} 掃描完成 ({end})：無交易訊號｜"
-            f"持倉 {held} 檔｜現金 {cash}｜{state}"
-        )
+        what = "無交易訊號" if not self.rejected else f"有訊號但 {len(self.rejected)} 筆未成交"
+        msg = (f"🫀 {self.strategy.name} 掃描完成 ({end})：{what}｜"
+               f"持倉 {held} 檔｜現金 {cash}｜{state}")
+        if self.rejected:
+            msg = "\n".join([msg] + self._rejected_lines())
+        return self.notifier.send(msg)
