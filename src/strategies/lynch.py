@@ -17,6 +17,13 @@ exit_buffer（季線緩衝）：
 緩衝讓賣出門檻降到季線下方 N%，形成緩衝區間 (hysteresis)。
 **預設 0.0 = 維持原行為**；要改預設值前必須先過三關驗證
 (tools/validate_lynch_buffer.py)，不可憑感覺調。
+
+take_profit（固定停利）：
+漲到成本 +N% 就無條件賣出。**預設 0.0 = 關閉**。
+先講清楚這跟林區本人的主張是相反的：他反對「拔掉花、澆灌雜草」——
+GARP 的報酬結構靠少數幾檔大贏家撐起全部，固定停利會把那幾檔的上檔先砍掉，
+而下檔虧損並不受限。它通常會讓勝率上升（感覺變好）但期望值下降。
+要不要開、開幾 %，一律由 tools/validate_take_profit.py 的三關驗證決定。
 """
 from __future__ import annotations
 
@@ -37,6 +44,7 @@ class LynchStrategy(Strategy):
         max_debt_ratio=60.0,
         ma_window=60,
         exit_buffer=0.0,  # 季線緩衝；0.0=原行為 (見模組 docstring)
+        take_profit=0.0,  # 固定停利；0.0=關閉 (見模組 docstring)
     )
 
     def __init__(self, **params):
@@ -71,6 +79,18 @@ class LynchStrategy(Strategy):
         peg_txt = f"{peg:.2f}" if peg is not None else "N/A"
 
         held = ctx.position is not None and ctx.position.shares > 0
+        # 固定停利優先於其他出場條件：漲到成本 +N% 就走，不管基本面還好不好。
+        # 成本基礎會被除息調整（見 data/corporate_actions.py），所以這是含息報酬。
+        tp = p["take_profit"]
+        entry = ctx.position.avg_price if held else 0.0
+        if held and tp > 0 and entry > 0 and price >= entry * (1 + tp):
+            return self._signal(
+                Action.SELL, 1.0,
+                f"停利出場：成本 {entry:.2f} → 現價 {price:.2f}"
+                f"（{price / entry - 1:+.1%}，門檻 +{tp:.0%}）",
+                ctx.symbol,
+            )
+
         if held and (score < 0.5 or broke_ma):
             buf = p["exit_buffer"]
             line = f"季線-{buf:.0%}" if buf > 0 else "季線"

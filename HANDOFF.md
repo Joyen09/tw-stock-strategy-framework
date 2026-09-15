@@ -175,6 +175,7 @@ python main.py listen --paper --paper-file "lynch=paper_account.json,livermore=p
 python main.py shioaji-test                           # 測 Shioaji 連線
 python main.py notify-test                            # 測通知（Telegram+Discord 都會發）
 python tools/validate_lynch_buffer.py --universe tw50 # 策略參數改動的三關驗證（標準事前寫死）
+python tools/validate_take_profit.py --universe tw50  # 「賺 N% 就走」該不該開的三關驗證
 python tools/churn_check.py                           # 交易品質健檢（來回洗、持有天數、勝率）
 python tools/why_idle.py --strategy lynch --universe mid100 --paper-file paper_lynch_mid100.json --regime --max-positions 2 --budget 10000   # 帳戶為什麼沒交易
 ```
@@ -216,6 +217,12 @@ deploy/               # systemd: stockbot(lynch-tw50) / stockbot-livermore / sto
   **決議：維持 exit_buffer=0**，程式碼保留參數供日後重驗。
   值得記的觀察：walkforward（樣本外）反而略有改善，與多頭期（樣本內）結論相反——
   但事前寫死的標準就是標準，不因為看到有利數字就改判。
+- **參數改動記分板**：lynch 固定停利 `take_profit`（2026-09-15）——提案動機是
+  「交易最少的帳戶報酬最好，那乾脆賺 N% 就走」。已參數化（預設 0=關閉）並備好
+  `tools/validate_take_profit.py`，**結果待跑**。這個參數的特別風險是「空過」：
+  門檻設太高就完全不觸發、結果與基準一模一樣，於是「不比基準差」自動通過——
+  所以 CRITERIA 多加一道機制檢查（停利至少要觸發 3 次）。判定時要一起看
+  勝率與最大單筆獲利：停利的典型樣子是**勝率上升、最大贏家被砍掉、總報酬下降**。
 - 新策略一律先過三關再談部署。別急著上真錢。
 - **改策略邏輯前先問：這是 bug 還是策略改動？** bug（實盤與回測不一致）直接修；
   策略改動一律先參數化、預設關閉、寫死標準後跑三關，通過才啟用。
