@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import os
 from typing import Dict, Optional
 
 import pandas as pd
@@ -42,6 +43,11 @@ class USLeadProvider:
         if proxy in self._cache:
             return self._cache[proxy]
         if proxy in self._failed:
+            return None
+        # 測試/離線模式：不打網路。單元測試不該依賴 Yahoo 能不能連上——
+        # 網路慢的機器會讓整個 test suite 看起來像當掉 (見 tests/conftest.py)。
+        if os.getenv("STOCKBOT_NO_NETWORK"):
+            self._failed.add(proxy)
             return None
         try:
             import logging

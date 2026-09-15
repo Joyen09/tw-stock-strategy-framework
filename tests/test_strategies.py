@@ -51,7 +51,7 @@ def test_peg_computation():
 def test_backtest_runs_and_reports():
     provider = SampleDataProvider()
     bt = Backtester(provider, initial_cash=1_000_000, warmup=200)
-    result = bt.run(strategies.build("livermore"), provider.universe(), "2024-01-01", "2025-12-31")
+    result = bt.run(strategies.build("livermore"), provider.universe(), "2025-01-01", "2025-12-31")
     assert not result.equity_curve.empty
     assert result.equity_curve.iloc[0] > 0
     # 績效指標可計算且不爆錯
@@ -85,10 +85,16 @@ def test_us_overnight_buys_on_strong_overnight():
 
 
 def test_all_strategies_backtest_without_error():
+    """全策略冒煙測試：只求「跑得完、不爆錯」，不驗績效。
+
+    窗口用一年就夠（仍有近 300 筆交易）。2026-09 修掉「暖身吃掉窗口」的 bug 後，
+    同樣的日期區間實際評估的 K 棒多了一倍，這個測試也跟著慢一倍——
+    在小台 VM 上會慢到像當掉，所以把窗口縮短，覆蓋度不變、時間減半。
+    """
     provider = SampleDataProvider()
     bt = Backtester(provider, warmup=250)
     for name in strategies.REGISTRY:
-        result = bt.run(strategies.build(name), provider.universe(), "2024-01-01", "2025-12-31")
+        result = bt.run(strategies.build(name), provider.universe(), "2025-01-01", "2025-12-31")
         assert not result.equity_curve.empty, name
 
 

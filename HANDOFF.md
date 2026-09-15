@@ -108,9 +108,10 @@ SHIOAJI_PERSON_ID=<你的身分證字號>   # 實際值只放 VM 的 .env，勿�
 5. **`--end` 預設已改成今天**（scan/screen）。
 6. **零股 bug（已修 PR#4）**：舊版把零股用 `shares//1000` 換算暴買 500 倍。已改 Common(張)+IntradayOdd(股)。
 7. **零股 >999 拆單 bug（已修）**：盤中零股單筆上限 999 股，`plan_order_lots()` 拆整張+零股兩段。
-8. **測試**：`tests/` 共 145 個（下單路徑/fees/兩種 PaperBroker/多帳戶/策略/基準備援/心跳/通知多通道/
-   Discord 控制/成交紀錄/大盤對照/實盤冷卻期/季線緩衝）。
-   改程式後先 `python -m pytest tests/ -q`。
+8. **測試**：`tests/` 共 200 個（下單路徑/fees/兩種 PaperBroker/多帳戶/策略/基準備援/心跳/通知多通道/
+   Discord 控制/成交紀錄/大盤對照/實盤冷卻期/季線緩衝/固定停利/除權息/未成交可見性/
+   回測暖身窗口/離線防護）。
+   改程式後先 `.venv/bin/python -m pytest -q`（約 27 秒，不打網路）。
 9. **⚠️ 永豐模擬盤的持倉/成交回報不可靠**：數字會自己成長、每次查都不同，只能當送單通道，
    驗收一律看本地 PaperBroker。
 10. **保險絲**：買單金額超過 `max_order_value`（預設 budget*1.5）拒單。**上真錢前一定要留著。**
@@ -169,6 +170,14 @@ SHIOAJI_PERSON_ID=<你的身分證字號>   # 實際值只放 VM 的 .env，勿�
     **影響範圍：exit_buffer、take_profit、lynch×mid100「三關全過」等所有歷史結論
     都建立在被截斷的窗口上，需要重跑才算數。**
     教訓：`0 筆交易` 這種訊號要一路追到根因，不能只換個參數看它會不會消失。
+24. **測試不准打網路**：`pytest` 在 VM 上會卡在 `test_all_strategies_backtest_without_error`
+    ——它建出的 us_overnight 策略會去 yfinance 抓 6 年 ^SOX / TSM 資料（`yfinance`
+    在 requirements 裡，VM 上真的裝了，所以真的會下載）。加上第 23 條修正後每個窗口
+    要評估的 K 棒多一倍，在小台 VM 上就像整個當掉。
+    已修：`tests/conftest.py` 設 `STOCKBOT_NO_NETWORK=1`，`USLeadProvider` 看到就直接
+    回 None（注入假資料的路徑不受影響）；全策略冒煙測試的窗口也從 2 年縮成 1 年。
+    **測試時間 47s → 27s，而且不再依賴 Yahoo 連不連得上。**
+    原則：單元測試依賴外部服務，失敗時分不清是程式壞了還是網路壞了。
 
 ## 5. 下一步
 
