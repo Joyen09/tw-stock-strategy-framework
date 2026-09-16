@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import List, Optional
 
 import pandas as pd
@@ -17,6 +18,22 @@ from ..models import Fundamentals
 from .base import DataProvider
 
 TAIEX = "TAIEX"  # 加權指數代號 (FinMind TaiwanStockTotalReturnIndex / 這裡用發行量加權)
+
+# --- 長跑韌性 (見 _call) ---
+# 一次三關驗證要打幾百次 API，中途只要斷一次、整份工作就白跑。
+RETRY_ATTEMPTS = int(os.getenv("FINMIND_RETRY_ATTEMPTS", "4"))   # 一般錯誤重試次數
+RETRY_BASE_SLEEP = float(os.getenv("FINMIND_RETRY_SLEEP", "3"))  # 指數退避起點 (秒)
+RATE_LIMIT_WAITS = int(os.getenv("FINMIND_RATE_WAITS", "6"))     # 撞額度時最多等幾輪
+RATE_LIMIT_SLEEP = float(os.getenv("FINMIND_RATE_SLEEP", "300")) # 每輪等多久 (秒)
+# 免費版是「滾動 60 分鐘 600 次」，等 5 分鐘就會有一批舊請求退出視窗、額度慢慢回來，
+# 所以撞到額度要「等」而不是「死」。預設最多等 6×5=30 分鐘。
+
+_RATE_HINTS = ("402", "429", "limit", "requests", "quota", "too many")
+
+
+def _is_rate_limit(err: Exception) -> bool:
+    msg = str(err).lower()
+    return any(h in msg for h in _RATE_HINTS)
 
 
 class FinMindProvider(DataProvider):
@@ -30,8 +47,42 @@ class FinMindProvider(DataProvider):
         if token:
             self.api.login_by_token(api_token=token)
 
+    def _call(self, fn, *args, what: str = "", **kwargs):
+        """打一次 FinMind，遇到暫時性錯誤退避重試、撞到額度就等額度回來。
+
+        為什麼需要：一次三關驗證要抓幾百次資料，跑幾十分鐘。沒有這層的話
+        中途斷線一次就整份工作報銷 —— 2026-09 連續幾次驗證都是這樣死的。
+
+        兩種錯誤分開處理：
+        - 一般網路錯誤：指數退避 (3/6/12/24 秒)，通常第二次就會過
+        - 撞到 API 額度：免費版是滾動 60 分鐘 600 次，等幾分鐘就會有舊請求
+          退出視窗、額度慢慢回來，所以是「等」不是「死」
+        """
+        rate_waits = 0
+        attempt = 0
+        while True:
+            try:
+                return fn(*args, **kwargs)
+            except Exception as e:
+                if _is_rate_limit(e):
+                    rate_waits += 1
+                    if rate_waits > RATE_LIMIT_WAITS:
+                        raise
+                    print(f"[finmind] ⏳ {what} 撞到 API 額度，等 {RATE_LIMIT_SLEEP / 60:.0f} 分鐘"
+                          f"讓額度回補 ({rate_waits}/{RATE_LIMIT_WAITS})...", flush=True)
+                    time.sleep(RATE_LIMIT_SLEEP)
+                    continue  # 等額度不算進一般重試次數
+                attempt += 1
+                if attempt >= RETRY_ATTEMPTS:
+                    raise
+                wait = RETRY_BASE_SLEEP * (2 ** (attempt - 1))
+                print(f"[finmind] ⚠️ {what} 失敗（{e}），{wait:.0f} 秒後重試 "
+                      f"{attempt}/{RETRY_ATTEMPTS - 1}", flush=True)
+                time.sleep(wait)
+
     def history(self, symbol: str, start: str, end: str) -> pd.DataFrame:
-        df = self.api.taiwan_stock_daily(stock_id=symbol, start_date=start, end_date=end)
+        df = self._call(self.api.taiwan_stock_daily, what=f"{symbol} 日線",
+                        stock_id=symbol, start_date=start, end_date=end)
         if df is None or df.empty:
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         df = df.rename(
@@ -93,7 +144,8 @@ class FinMindProvider(DataProvider):
 
         # 1) 估值：PER / PBR / 殖利率
         try:
-            per = self.api.taiwan_stock_per_pbr(stock_id=symbol, start_date=start)
+            per = self._call(self.api.taiwan_stock_per_pbr, what=f"{symbol} PER/PBR",
+                             stock_id=symbol, start_date=start)
             if per is not None and not per.empty:
                 latest = per.sort_values("date").iloc[-1]
                 f.pe = float(latest["PER"]) if latest.get("PER") not in (None, 0) else None
@@ -106,7 +158,8 @@ class FinMindProvider(DataProvider):
         # 2) 損益表：毛利率、EPS 成長 (季 YoY)
         income = None
         try:
-            income = self._pivot(self.api.taiwan_stock_financial_statement(stock_id=symbol, start_date=start))
+            income = self._pivot(self._call(self.api.taiwan_stock_financial_statement,
+                                            what=f"{symbol} 損益表", stock_id=symbol, start_date=start))
             rev = self._col(income, self._REVENUE)
             gross = self._col(income, self._GROSS)
             eps = self._col(income, self._EPS)
@@ -121,7 +174,8 @@ class FinMindProvider(DataProvider):
 
         # 3) 資產負債表：負債比、流動比、ROE
         try:
-            bs = self._pivot(self.api.taiwan_stock_balance_sheet(stock_id=symbol, start_date=start))
+            bs = self._pivot(self._call(self.api.taiwan_stock_balance_sheet,
+                                        what=f"{symbol} 資產負債表", stock_id=symbol, start_date=start))
             assets = self._col(bs, self._ASSETS)
             liab = self._col(bs, self._LIAB)
             ca = self._col(bs, self._CUR_ASSETS)
@@ -141,7 +195,8 @@ class FinMindProvider(DataProvider):
 
         # 4) 月營收 YoY 成長
         try:
-            mr = self.api.taiwan_stock_month_revenue(stock_id=symbol, start_date=start)
+            mr = self._call(self.api.taiwan_stock_month_revenue, what=f"{symbol} 月營收",
+                            stock_id=symbol, start_date=start)
             if mr is not None and not mr.empty and "revenue" in mr.columns:
                 rev_m = mr.sort_values("date")["revenue"].astype(float).reset_index(drop=True)
                 if len(rev_m) >= 13 and rev_m.iloc[-13]:
@@ -151,7 +206,8 @@ class FinMindProvider(DataProvider):
 
         # 5) 現金流量表：近四季自由現金流 (營業現金流 - 資本支出)，雷浩斯獲利能力矩陣用
         try:
-            cf = self._pivot(self.api.taiwan_stock_cash_flows_statement(stock_id=symbol, start_date=start))
+            cf = self._pivot(self._call(self.api.taiwan_stock_cash_flows_statement,
+                                        what=f"{symbol} 現金流量表", stock_id=symbol, start_date=start))
             op = self._col(cf, ["CashProvidedByOperatingActivities",
                                 "NetCashProvidedByUsedInOperatingActivities",
                                 "CashFlowsFromOperatingActivities"])
@@ -188,9 +244,9 @@ class FinMindProvider(DataProvider):
         回測引擎已用「只看前一日(含)以前」切片避免前視偏差。
         """
         try:
-            df = self.api.taiwan_stock_institutional_investors(
-                stock_id=symbol, start_date=start, end_date=end
-            )
+            df = self._call(self.api.taiwan_stock_institutional_investors,
+                            what=f"{symbol} 法人買賣超",
+                            stock_id=symbol, start_date=start, end_date=end)
         except Exception:
             return None
         if df is None or df.empty or "name" not in df.columns:

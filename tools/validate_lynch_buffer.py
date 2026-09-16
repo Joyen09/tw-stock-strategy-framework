@@ -16,7 +16,16 @@ exit_buffer 讓賣出門檻降到季線下方 N%，形成緩衝區間。
    空頭期 0 筆交易視為「沒測到」而非通過（空過會給出假的安全感）
 3. Walkforward：訓練期選股 → 測試期（沒看過的未來）驗證，防背答案
 
-用法（在 VM 上，.env 有 FINMIND_TOKEN）：
+用法（在 VM 上，.env 有 FINMIND_TOKEN）。**跑很久，一定要放背景**，
+否則 SSH 一斷線整份工作就沒了（-u 關掉輸出緩衝，log 才會即時寫入）：
+
+    nohup .venv/bin/python -u tools/validate_lynch_buffer.py --universe tw50 > tp_tw50.log 2>&1 &
+    tail -f tp_tw50.log          # 看進度，Ctrl-C 只會離開 tail，工作繼續跑
+
+FinMind 斷線會自動退避重試、撞到額度會等額度回補（見 src/data/finmind.py），
+所以不必守著它。真的中斷了也直接重跑：已抓到的資料在 data_cache/ 裡，會接續。
+
+舊寫法（前景，會被斷線殺掉）：
     python tools/validate_lynch_buffer.py                      # tw50，預設緩衝組合
     python tools/validate_lynch_buffer.py --universe mid100    # mid100 要另外驗
     python tools/validate_lynch_buffer.py --buffers 0,0.03     # 只比兩組
