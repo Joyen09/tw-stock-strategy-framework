@@ -6,12 +6,16 @@
 2026-09 的觀察：交易最少的帳戶（lynch-mid100，0 筆成交）報酬最好 +34%，
 交易最多的 livermore 虧最多。很自然會想「那乾脆設定賺 N% 就走」。
 
-但這件事在理論上是反過來的：GARP／成長股的報酬結構靠**少數幾檔大贏家**
-撐起全部，固定停利會把那幾檔的上檔先砍掉，下檔虧損卻不受限制——
-林區自己的說法是「拔掉花、澆灌雜草」。停利通常會讓**勝率上升**
-（每筆都小賺出場，感覺很好）但**期望值下降**。
+理論上這是反過來的：GARP／成長股的報酬結構靠**少數幾檔大贏家**撐起全部，
+固定停利會把那幾檔的上檔先砍掉，下檔虧損卻不受限制——林區自己的說法是
+「拔掉花、澆灌雜草」。停利通常會讓**勝率上升**（每筆都小賺出場，感覺很好）
+但**期望值下降**。「感覺很好」正是它危險的地方，所以不能憑感覺決定，要用資料。
 
-「感覺很好」正是它危險的地方，所以不能憑感覺決定，要用資料。
+⚠️ 但別把上面那段當成已知答案。2026-09-16 修掉回測暖身 bug 後重跑 tw50，
+停利 10% 的多頭報酬與 walkforward 反而**優於**基準（只卡在空頭回撤惡化），
+跟理論預期不一致。跨門檻表現又忽好忽壞（10% 好、20% 差、30% 普通），
+比較像路徑運氣而非結構性效果。**本檔只負責把資料攤開，結論由 CRITERIA 判，
+不由 docstring 判。**
 
 # 為什麼要先寫死標準
 
@@ -26,7 +30,7 @@
 
 # 三關
 
-1. 多頭回測：停利版要「不比現行差」（這關最難過，停利就是砍上檔）
+1. 多頭回測：停利版要「不比現行差」
 2. 空頭壓測：2021-07 起跨進 2022 空頭，回撤不可惡化；0 筆交易視為沒測到
 3. Walkforward：訓練期選股 → 測試期（沒看過的未來）驗證，防背答案
 
@@ -226,12 +230,27 @@ def main():
               f"{(wf.sharpe if wf else float('nan')):>9.2f}"
               f"{(wf.total_return if wf else float('nan')):>10.2%}"
               f"{bh['win_rate']:>8.0%}{bh['best']:>10.1%}")
-    print("\n註：勝率上升但總報酬下降，就是停利典型的樣子——每筆都小賺很舒服，")
-    print("　　但撐起整體報酬的那幾檔大贏家被提前砍掉了。看『最大單筆』那欄最清楚。")
+    # 這裡只描述資料本身，不寫死結論。
+    # （本檔第一版寫死了「勝率上升、報酬下降」的說法，2026-09-16 修掉回測暖身 bug 後
+    #  重跑，資料出現勝率與報酬同時上升的組合，寫死的註解就變成在騙自己。
+    #  工具要report 看到什麼，不要 report 我預期看到什麼。）
+    print("\n判讀提示：")
+    print("　停利機械上一定會壓低『最大單筆』——那欄若沒變小，代表門檻根本沒咬到。")
+    print("　勝率上升是必然（小賺就跑），本身不算好消息，要跟總報酬一起看。")
+    ret_dir = {tp: results[tp]["bull"].total_return - base["bull"].total_return
+               for tp in levels if tp != 0}
+    if ret_dir and all(v < 0 for v in ret_dir.values()):
+        print("　→ 本次所有門檻的多頭報酬都比基準低：砍上檔的代價大於避開回檔的好處。")
+    elif ret_dir and any(v > 0 for v in ret_dir.values()):
+        better = [f"{t:.0%}" for t, v in ret_dir.items() if v > 0]
+        print(f"　→ ⚠️ 有門檻（{'、'.join(better)}）的多頭報酬**高於**基準。")
+        print("　　 若非全部門檻同向，多半是路徑運氣而非結構性效果——")
+        print("　　 真實的效果應該隨門檻單調變化，忽好忽壞就是雜訊的樣子。")
 
     print("\n" + "=" * 78)
     print("逐項判定（標準見 CRITERIA，事前寫死）：\n")
     winners = []
+    failed_gates: dict = {}   # 關卡名 -> 卡在這關的門檻清單
     for tp in levels:
         if tp == 0:
             continue
@@ -283,6 +302,8 @@ def main():
         print(f"【停利 {tp:.0%}】{'✅ 全數通過' if ok else '❌ 未通過'}")
         for name, passed, detail in checks:
             print(f"    {'✓' if passed else '✗'} {name}：{detail}")
+            if not passed:
+                failed_gates.setdefault(name, []).append(tp)
         print()
         if ok:
             winners.append((tp, r["bull"].sharpe))
@@ -290,9 +311,15 @@ def main():
     print("=" * 78)
     if not winners:
         print("🔴 沒有任何停利門檻通過 → 維持現行設定（take_profit=0，不停利）。")
-        print("   這個結果要照實記錄並接受：『賺 N% 就走』在直覺上很吸引人，")
-        print("   但在歷史資料上它砍掉的大贏家比它避開的回檔還多。")
-        print("   真正該處理的是『虧損那一側』（出場規則、部位大小），不是獲利那一側。")
+        # 卡在哪一關是重要資訊：全卡關1 = 停利本身不划算；
+        # 關1 過了卻卡關2 = 它在多頭有用、在空頭會放大回撤，那是另一回事。
+        if failed_gates:
+            worst = sorted(failed_gates.items(), key=lambda kv: -len(kv[1]))
+            print("\n   各門檻卡在哪一關：")
+            for gate, tps in worst:
+                print(f"     {gate}：{'、'.join(f'{t:.0%}' for t in tps)}")
+            print("\n   注意：只要有門檻是『其他關都過、單卡一關』，就不能簡化成")
+            print("   『停利沒用』——要看它是輸在哪裡，以及跨門檻的表現是否一致。")
     else:
         winners.sort(key=lambda x: x[1], reverse=True)
         best = winners[0][0]
