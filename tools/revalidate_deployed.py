@@ -66,6 +66,37 @@ CRITERIA = {
 
 NEW_IN_THIS_FILE = {"關1 多頭夏普", "關2 空頭回撤"}  # 標示哪些門檻是本檔新訂的
 
+# ──────────────────────────────────────────────────────────
+# 大盤對照（2026-09-17 追加，見下方說明）
+# ──────────────────────────────────────────────────────────
+# ⚠️ 誠實揭露：這一項是在看到「三組全部卡關3」之後才加的。
+# 事後加標準通常是作弊，但這裡有個關鍵差別：**它只會讓判定更嚴，不可能救活任何一組**。
+# 事後「放寬」標準去救失敗的東西才是作弊；事後「加嚴」是補上原本就該問的問題。
+#
+# 為什麼原本就該問：三關全部只量「策略自己的絕對績效」，從頭到尾沒有跟大盤比過。
+# 多頭期夏普 1.10、報酬 +45% 看起來很好，但如果同期大盤買進持有就 +55%，
+# 那這套系統做的所有事情是**淨減損**——承擔了選股風險、付了手續費與稅，
+# 換來比躺著不動更差的結果。（諷刺的是 report 早就會對照大盤，回測反而沒有。）
+BENCH_GATE = "關4 多頭期贏過大盤"
+
+
+def _buy_hold(provider, start, end):
+    """同期大盤買進持有的報酬／夏普／回撤。抓不到回 None（不讓整份工作掛掉）。"""
+    try:
+        s = provider.benchmark(start, end)
+    except Exception as e:
+        print(f"  [bench] {start}~{end} 大盤抓取失敗（略過對照）：{e}", flush=True)
+        return None
+    if s is None or len(s) < 2:
+        return None
+    r = s.pct_change().dropna()
+    return {
+        "ret": float(s.iloc[-1]) / float(s.iloc[0]) - 1,
+        "sharpe": float(r.mean() / r.std() * (252 ** 0.5)) if float(r.std()) else 0.0,
+        "dd": float((s / s.cummax() - 1).min()),
+    }
+
+
 # 期間設定（與其他驗證工具一致）
 BULL = ("2024-01-01", "2025-12-31")
 BEAR = ("2021-07-01", "2022-12-31")
@@ -127,8 +158,17 @@ def _evaluate(name, strat_name, universe, service, provider, top, common):
               f"回撤 {wf.max_drawdown:.2%}｜{len(wf.trades)} 筆", flush=True)
     else:
         print("  關3 訓練期選不出股票", flush=True)
+    bull_bh = _buy_hold(provider, *BULL)
+    bear_bh = _buy_hold(provider, *BEAR)
+    if bull_bh:
+        ex = bull.total_return - bull_bh["ret"]
+        print(f"  關4 同期大盤買進持有：多頭 {bull_bh['ret']:+.2%}（夏普 {bull_bh['sharpe']:.2f}）"
+              f" → 策略超額 {ex:+.2%}", flush=True)
+    if bear_bh:
+        print(f"       空頭期大盤 {bear_bh['ret']:+.2%}／回撤 {bear_bh['dd']:.2%}"
+              f"（策略回撤 {bear.max_drawdown:.2%}）", flush=True)
     print(flush=True)
-    return {"bull": bull, "bear": bear, "wf": wf}
+    return {"bull": bull, "bear": bear, "wf": wf, "bull_bh": bull_bh, "bear_bh": bear_bh}
 
 
 def _judge(r) -> list:
@@ -160,6 +200,16 @@ def _judge(r) -> list:
         out.append(("關3 WF 夏普", c, f"{wf.sharpe:.2f} (門檻 {CRITERIA['wf_min_sharpe']})"))
         c = wf.total_return > CRITERIA["wf_min_return"]
         out.append(("關3 WF 報酬", c, f"{wf.total_return:+.2%} (門檻 > 0)"))
+
+    # 關4：多頭期有沒有贏過「什麼都不做、直接買大盤」。抓不到大盤就不判（不臆測）。
+    bh = r.get("bull_bh")
+    if bh is None:
+        out.append((BENCH_GATE, False, "抓不到大盤資料 → 沒測到"))
+    else:
+        ex = bull.total_return - bh["ret"]
+        out.append((BENCH_GATE, ex > 0,
+                    f"策略 {bull.total_return:+.2%} vs 大盤 {bh['ret']:+.2%}"
+                    f"（超額 {ex:+.2%}）"))
     return out
 
 
@@ -191,15 +241,22 @@ def main():
         results[name] = _evaluate(name, strat_name, universe, service, provider, args.top, common)
 
     print("=" * 78)
-    print(f"{'設定':<18}{'多頭夏普':>10}{'多頭報酬':>10}{'空頭回撤':>10}{'WF夏普':>9}{'WF報酬':>10}")
+    print(f"{'設定':<18}{'多頭夏普':>10}{'多頭報酬':>10}{'超額':>10}{'空頭回撤':>10}"
+          f"{'WF夏普':>9}{'WF報酬':>10}")
     print("-" * 78)
     for name in results:
         r = results[name]
-        wf = r["wf"]
+        wf, bh = r["wf"], r.get("bull_bh")
+        ex = (r["bull"].total_return - bh["ret"]) if bh else float("nan")
         print(f"{name:<18}{r['bull'].sharpe:>10.2f}{r['bull'].total_return:>10.2%}"
-              f"{r['bear'].max_drawdown:>10.2%}"
+              f"{ex:>10.2%}{r['bear'].max_drawdown:>10.2%}"
               f"{(wf.sharpe if wf else float('nan')):>9.2f}"
               f"{(wf.total_return if wf else float('nan')):>10.2%}")
+    if any(results[n].get("bull_bh") for n in results):
+        b = next(results[n]["bull_bh"] for n in results if results[n].get("bull_bh"))
+        print("")
+        print(f"（同期大盤買進持有：{b['ret']:+.2%}，夏普 {b['sharpe']:.2f}——"
+              f"『超額』為負代表這套系統做的一切都是淨減損）")
 
     print("\n" + "=" * 78)
     print("逐項判定（★ = 本檔新訂的門檻，訂定時已看過部分結果，證據力較弱）：\n")
