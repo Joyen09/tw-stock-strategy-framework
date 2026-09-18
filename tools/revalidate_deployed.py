@@ -103,6 +103,13 @@ BEAR = ("2021-07-01", "2022-12-31")
 WF_TRAIN = ("2023-01-01", "2024-06-30")
 WF_TEST = ("2024-07-01", "2025-12-31")
 
+# 全週期（2026-09-18 追加）：橫跨 2022 空頭與 2024~25 多頭。
+# 為什麼需要：關1 只看多頭、關2 只看空頭，分開看會得到相反的印象——
+# 多頭期輸大盤 17~26 個百分點，空頭期卻可能守得比大盤好。
+# 「防守型策略」的正當性只有一個檢驗方式：**跨完整循環的總帳**。
+# 犧牲多頭上檔換空頭保護，如果整個循環下來還是輸給躺著不動，那個犧牲就沒有意義。
+FULL = ("2021-07-01", "2025-12-31")
+
 # 現在實盤在跑的三組（對應 deploy/*.service）
 CONFIGS = [
     ("lynch × tw50", "lynch", "tw50", "stockbot.service"),
@@ -158,6 +165,9 @@ def _evaluate(name, strat_name, universe, service, provider, top, common):
               f"回撤 {wf.max_drawdown:.2%}｜{len(wf.trades)} 筆", flush=True)
     else:
         print("  關3 訓練期選不出股票", flush=True)
+    print("  全週期回測中（2021-07~2025-12，跨空頭+多頭）...", flush=True)
+    full = _bt(provider, strat_name, symbols, *FULL, **common)
+    full_bh = _buy_hold(provider, *FULL)
     bull_bh = _buy_hold(provider, *BULL)
     bear_bh = _buy_hold(provider, *BEAR)
     if bull_bh:
@@ -167,8 +177,16 @@ def _evaluate(name, strat_name, universe, service, provider, top, common):
     if bear_bh:
         print(f"       空頭期大盤 {bear_bh['ret']:+.2%}／回撤 {bear_bh['dd']:.2%}"
               f"（策略回撤 {bear.max_drawdown:.2%}）", flush=True)
+    if full_bh:
+        ex = full.total_return - full_bh["ret"]
+        print(f"  全週期 {FULL[0]}~{FULL[1]}：策略 {full.total_return:+.2%}"
+              f"（夏普 {full.sharpe:.2f}／回撤 {full.max_drawdown:.2%}）", flush=True)
+        print(f"       vs 大盤買進持有 {full_bh['ret']:+.2%}"
+              f"（夏普 {full_bh['sharpe']:.2f}／回撤 {full_bh['dd']:.2%}）"
+              f" → 超額 {ex:+.2%}", flush=True)
     print(flush=True)
-    return {"bull": bull, "bear": bear, "wf": wf, "bull_bh": bull_bh, "bear_bh": bear_bh}
+    return {"bull": bull, "bear": bear, "wf": wf, "full": full,
+            "bull_bh": bull_bh, "bear_bh": bear_bh, "full_bh": full_bh}
 
 
 def _judge(r) -> list:
@@ -252,6 +270,27 @@ def main():
               f"{ex:>10.2%}{r['bear'].max_drawdown:>10.2%}"
               f"{(wf.sharpe if wf else float('nan')):>9.2f}"
               f"{(wf.total_return if wf else float('nan')):>10.2%}")
+    # 全週期總帳：這才是「防守型策略」唯一有意義的檢驗
+    if any(results[n].get("full_bh") for n in results):
+        fb = next(results[n]["full_bh"] for n in results if results[n].get("full_bh"))
+        print("")
+        print(f"全週期 {FULL[0]}~{FULL[1]}（跨 2022 空頭 + 2024~25 多頭）")
+        print(f"{'設定':<18}{'報酬':>10}{'超額':>10}{'夏普':>8}{'回撤':>10}")
+        print("-" * 78)
+        print(f"{'大盤買進持有':<18}{fb['ret']:>10.2%}{'—':>10}"
+              f"{fb['sharpe']:>8.2f}{fb['dd']:>10.2%}")
+        for name in results:
+            f_, fbh = results[name].get("full"), results[name].get("full_bh")
+            if f_ is None or fbh is None:
+                continue
+            print(f"{name:<18}{f_.total_return:>10.2%}"
+                  f"{f_.total_return - fbh['ret']:>10.2%}"
+                  f"{f_.sharpe:>8.2f}{f_.max_drawdown:>10.2%}")
+        print("")
+        print("判讀：防守型策略犧牲多頭上檔、換空頭保護。這個取捨要成立，全週期")
+        print("　　　必須至少滿足一項——報酬贏過買進持有，或報酬接近但回撤明顯更小。")
+        print("　　　兩項都輸，那個犧牲就沒有換到任何東西。")
+
     if any(results[n].get("bull_bh") for n in results):
         b = next(results[n]["bull_bh"] for n in results if results[n].get("bull_bh"))
         print("")
