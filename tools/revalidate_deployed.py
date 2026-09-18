@@ -97,6 +97,42 @@ def _buy_hold(provider, start, end):
     }
 
 
+def _regime_only(provider, start, end, ma_window=200):
+    """對照組：**不選股**，只對大盤做年線濾網（站上年線持有、跌破就空手）。
+
+    2026-09-18 加。動機：空頭期策略回撤只有大盤的一半（-16.65% vs -31.63%），
+    看起來很會防守——但那個防守幾乎全部來自「大盤濾網讓它空手」，不是來自選股。
+    如果把同一條濾網直接套在大盤上就能拿到同樣的保護，那中間所有選股機制
+    （財報、PEG、季線、停損、手續費與稅）就是白做的。
+
+    這是最關鍵的對照組：**把「選股的價值」和「擇時的價值」分開**。
+    暖身資料另外抓（與 Backtester 同一個原則），否則前 200 天算不出年線。
+    """
+    import pandas as pd
+
+    warm = (pd.Timestamp(start) - pd.Timedelta(days=int(ma_window * 1.55) + 45)).strftime("%Y-%m-%d")
+    try:
+        s = provider.benchmark(warm, end)
+    except Exception:
+        return None
+    if s is None or len(s) < ma_window:
+        return None
+    ma = s.rolling(ma_window).mean()
+    inpos = (s >= ma)                      # 當日收盤站上年線 → 持有
+    ret = s.pct_change().fillna(0.0)
+    # 當日決策、次日生效（shift 1），避免用當天的收盤決定當天的部位
+    strat_ret = ret * inpos.shift(1).fillna(False).astype(float)
+    win = strat_ret.loc[start:end]
+    if win.empty:
+        return None
+    curve = (1 + win).cumprod()
+    return {
+        "ret": float(curve.iloc[-1]) - 1,
+        "sharpe": float(win.mean() / win.std() * (252 ** 0.5)) if float(win.std()) else 0.0,
+        "dd": float((curve / curve.cummax() - 1).min()),
+    }
+
+
 # 期間設定（與其他驗證工具一致）
 BULL = ("2024-01-01", "2025-12-31")
 BEAR = ("2021-07-01", "2022-12-31")
@@ -177,6 +213,10 @@ def _evaluate(name, strat_name, universe, service, provider, top, common):
     if bear_bh:
         print(f"       空頭期大盤 {bear_bh['ret']:+.2%}／回撤 {bear_bh['dd']:.2%}"
               f"（策略回撤 {bear.max_drawdown:.2%}）", flush=True)
+    reg = _regime_only(provider, *FULL)
+    if reg:
+        print(f"  對照組（不選股，只對大盤做年線濾網）全週期：{reg['ret']:+.2%}"
+              f"（夏普 {reg['sharpe']:.2f}／回撤 {reg['dd']:.2%}）", flush=True)
     if full_bh:
         ex = full.total_return - full_bh["ret"]
         print(f"  全週期 {FULL[0]}~{FULL[1]}：策略 {full.total_return:+.2%}"
@@ -186,7 +226,7 @@ def _evaluate(name, strat_name, universe, service, provider, top, common):
               f" → 超額 {ex:+.2%}", flush=True)
     print(flush=True)
     return {"bull": bull, "bear": bear, "wf": wf, "full": full,
-            "bull_bh": bull_bh, "bear_bh": bear_bh, "full_bh": full_bh}
+            "bull_bh": bull_bh, "bear_bh": bear_bh, "full_bh": full_bh, "regime": reg}
 
 
 def _judge(r) -> list:
@@ -279,6 +319,11 @@ def main():
         print("-" * 78)
         print(f"{'大盤買進持有':<18}{fb['ret']:>10.2%}{'—':>10}"
               f"{fb['sharpe']:>8.2f}{fb['dd']:>10.2%}")
+        rg = next((results[n].get("regime") for n in results if results[n].get("regime")), None)
+        if rg:
+            print(f"{'大盤+年線濾網':<18}{rg['ret']:>10.2%}"
+                  f"{rg['ret'] - fb['ret']:>10.2%}{rg['sharpe']:>8.2f}{rg['dd']:>10.2%}"
+                  f"   ← 不選股的對照組")
         for name in results:
             f_, fbh = results[name].get("full"), results[name].get("full_bh")
             if f_ is None or fbh is None:
@@ -290,6 +335,10 @@ def main():
         print("判讀：防守型策略犧牲多頭上檔、換空頭保護。這個取捨要成立，全週期")
         print("　　　必須至少滿足一項——報酬贏過買進持有，或報酬接近但回撤明顯更小。")
         print("　　　兩項都輸，那個犧牲就沒有換到任何東西。")
+        print("")
+        print("　　　**更關鍵的是跟「大盤+年線濾網」比**：那一列完全不選股，只有擇時。")
+        print("　　　策略贏不過它 → 所有選股機制（財報、PEG、季線、停損、手續費與稅）")
+        print("　　　都是白做的，真正在起作用的只有那條年線。")
 
     if any(results[n].get("bull_bh") for n in results):
         b = next(results[n]["bull_bh"] for n in results if results[n].get("bull_bh"))
