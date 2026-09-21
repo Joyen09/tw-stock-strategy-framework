@@ -113,9 +113,19 @@ def _regime_only(provider, start, end, ma_window=200):
     warm = (pd.Timestamp(start) - pd.Timedelta(days=int(ma_window * 1.55) + 45)).strftime("%Y-%m-%d")
     try:
         s = provider.benchmark(warm, end)
-    except Exception:
+    except Exception as e:
+        print(f"  ⚠️ 對照組（大盤+年線濾網）算不出來：{e}", flush=True)
         return None
-    if s is None or len(s) < ma_window:
+    # 2026-09-18 實跑時這裡靜默回 None，整張表就少了最關鍵的一列卻沒人知道。
+    # TAIEX 請求本來就會 hang（見 HANDOFF 注意事項 12），逾時就回 None、還會被
+    # 快取成哨兵值，於是每次重跑都一樣缺。沒講出來 = 又一次靜默失敗。
+    if s is None:
+        print(f"  ⚠️ 對照組（大盤+年線濾網）算不出來：抓不到 {warm} 起的大盤資料"
+              f"（TAIEX 逾時會被快取，清掉 data_cache/bm_*.pkl 再試）", flush=True)
+        return None
+    if len(s) < ma_window:
+        print(f"  ⚠️ 對照組（大盤+年線濾網）算不出來：只有 {len(s)} 根，"
+              f"不足以算 {ma_window} 日均線", flush=True)
         return None
     ma = s.rolling(ma_window).mean()
     inpos = (s >= ma)                      # 當日收盤站上年線 → 持有
@@ -130,6 +140,52 @@ def _regime_only(provider, start, end, ma_window=200):
         "ret": float(curve.iloc[-1]) - 1,
         "sharpe": float(win.mean() / win.std() * (252 ** 0.5)) if float(win.std()) else 0.0,
         "dd": float((curve / curve.cummax() - 1).min()),
+    }
+
+
+def _universe_buy_hold(provider, symbols, start, end, warmup=250):
+    """對照組：**同一個股池、等權買進持有、完全不選股不擇時**。
+
+    2026-09-21 加，而且這是三個對照組裡最關鍵的一個。
+
+    拿策略跟 TAIEX 比，會把兩件事混在一起：
+      (a) 策略的選股能力
+      (b) 這個股池本身在這段期間贏不贏大盤（中小型股 2021~2025 就是比大盤強）
+    更嚴重的是**生存者偏差**：mid100 是「今天還活著」的名單，拿它回測 2021 年
+    等於預先知道哪些公司撐過來了。跟 TAIEX 比的話，這個偏差全部算進策略的功勞。
+
+    改跟「同一個股池等權買進持有」比，上面兩個因素**兩邊都有、直接抵銷**，
+    剩下的差額才是選股真正的貢獻。
+
+    抓資料刻意沿用 Backtester 的 fetch_start 算法，讓快取命中、不多打 API。
+    """
+    import pandas as pd
+
+    fetch_start = (pd.Timestamp(start) - pd.Timedelta(days=int(warmup * 1.55) + 45)).strftime("%Y-%m-%d")
+    cols = []
+    for sym in symbols:
+        try:
+            df = provider.history(sym, fetch_start, end)
+        except Exception:
+            continue
+        if df is None or df.empty:
+            continue
+        c = df["close"].loc[start:end]
+        if len(c) < 2 or float(c.iloc[0]) <= 0:
+            continue
+        cols.append(c / float(c.iloc[0]))        # 各檔正規化到起點=1（等權）
+    if not cols:
+        print("  ⚠️ 對照組（同股池等權買進持有）算不出來：沒有可用的價格資料", flush=True)
+        return None
+    curve = pd.concat(cols, axis=1).sort_index().ffill().mean(axis=1, skipna=True).dropna()
+    if len(curve) < 2:
+        return None
+    r = curve.pct_change().dropna()
+    return {
+        "ret": float(curve.iloc[-1]) / float(curve.iloc[0]) - 1,
+        "sharpe": float(r.mean() / r.std() * (252 ** 0.5)) if float(r.std()) else 0.0,
+        "dd": float((curve / curve.cummax() - 1).min()),
+        "n": len(cols),
     }
 
 
@@ -213,6 +269,12 @@ def _evaluate(name, strat_name, universe, service, provider, top, common):
     if bear_bh:
         print(f"       空頭期大盤 {bear_bh['ret']:+.2%}／回撤 {bear_bh['dd']:.2%}"
               f"（策略回撤 {bear.max_drawdown:.2%}）", flush=True)
+    uni_bh = _universe_buy_hold(provider, symbols, *FULL)
+    if uni_bh:
+        ex = full.total_return - uni_bh["ret"]
+        print(f"  對照組（同股池 {uni_bh['n']} 檔等權買進持有，不選股）全週期："
+              f"{uni_bh['ret']:+.2%}（夏普 {uni_bh['sharpe']:.2f}／回撤 {uni_bh['dd']:.2%}）"
+              f" → 選股貢獻 {ex:+.2%}", flush=True)
     reg = _regime_only(provider, *FULL)
     if reg:
         print(f"  對照組（不選股，只對大盤做年線濾網）全週期：{reg['ret']:+.2%}"
@@ -226,7 +288,8 @@ def _evaluate(name, strat_name, universe, service, provider, top, common):
               f" → 超額 {ex:+.2%}", flush=True)
     print(flush=True)
     return {"bull": bull, "bear": bear, "wf": wf, "full": full,
-            "bull_bh": bull_bh, "bear_bh": bear_bh, "full_bh": full_bh, "regime": reg}
+            "bull_bh": bull_bh, "bear_bh": bear_bh, "full_bh": full_bh,
+            "regime": reg, "uni_bh": uni_bh}
 
 
 def _judge(r) -> list:
@@ -328,17 +391,25 @@ def main():
             f_, fbh = results[name].get("full"), results[name].get("full_bh")
             if f_ is None or fbh is None:
                 continue
+            ub = results[name].get("uni_bh")
+            if ub:
+                print(f"{'  └ 同股池等權持有':<18}{ub['ret']:>10.2%}"
+                      f"{ub['ret'] - fbh['ret']:>10.2%}{ub['sharpe']:>8.2f}{ub['dd']:>10.2%}"
+                      f"   ← {name} 的股池，不選股")
             print(f"{name:<18}{f_.total_return:>10.2%}"
                   f"{f_.total_return - fbh['ret']:>10.2%}"
-                  f"{f_.sharpe:>8.2f}{f_.max_drawdown:>10.2%}")
+                  f"{f_.sharpe:>8.2f}{f_.max_drawdown:>10.2%}"
+                  + (f"   選股貢獻 {f_.total_return - ub['ret']:+.2%}" if ub else ""))
         print("")
         print("判讀：防守型策略犧牲多頭上檔、換空頭保護。這個取捨要成立，全週期")
         print("　　　必須至少滿足一項——報酬贏過買進持有，或報酬接近但回撤明顯更小。")
         print("　　　兩項都輸，那個犧牲就沒有換到任何東西。")
         print("")
-        print("　　　**更關鍵的是跟「大盤+年線濾網」比**：那一列完全不選股，只有擇時。")
-        print("　　　策略贏不過它 → 所有選股機制（財報、PEG、季線、停損、手續費與稅）")
-        print("　　　都是白做的，真正在起作用的只有那條年線。")
+        print("　　　**更關鍵的是「選股貢獻」那一欄**：策略 vs 同一個股池等權買進持有。")
+        print("　　　跟 TAIEX 比會把『股池本身強不強』和『mid100 的生存者偏差』")
+        print("　　　一起算進策略的功勞；跟自己的股池比，那兩個因素兩邊都有、直接抵銷，")
+        print("　　　剩下的差額才是選股真正的貢獻。為負 = 還不如把整個股池買下來擺著。")
+        print("　　　「大盤+年線濾網」那一列則是把擇時的價值單獨抽出來看。")
 
     if any(results[n].get("bull_bh") for n in results):
         b = next(results[n]["bull_bh"] for n in results if results[n].get("bull_bh"))
