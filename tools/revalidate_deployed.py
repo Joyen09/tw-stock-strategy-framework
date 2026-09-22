@@ -97,7 +97,7 @@ def _buy_hold(provider, start, end):
     }
 
 
-def _regime_only(provider, start, end, ma_window=200):
+def _regime_only(provider, start, end, ma_window=200, fee_discount=0.28):
     """對照組：**不選股**，只對大盤做年線濾網（站上年線持有、跌破就空手）。
 
     2026-09-18 加。動機：空頭期策略回撤只有大盤的一半（-16.65% vs -31.63%），
@@ -135,11 +135,23 @@ def _regime_only(provider, start, end, ma_window=200):
     win = strat_ret.loc[start:end]
     if win.empty:
         return None
+    # 交易成本：進出場各扣一次，否則這個對照組是零成本、對它不公平地有利。
+    # 4.5 年只切換幾次，成本很小，但「小到可忽略」要用算的、不能用猜的。
+    from src.broker import fees
+
+    buy_rate = fees.BROKER_FEE_RATE * fee_discount
+    sell_rate = fees.BROKER_FEE_RATE * fee_discount + fees.TAX_RATE
+    pos = inpos.shift(1).fillna(False).astype(bool).loc[start:end]
+    switch = pos.ne(pos.shift(1).fillna(False))
+    cost = switch.astype(float) * pos.map(lambda x: buy_rate if x else sell_rate)
+    cost.iloc[0] = buy_rate if bool(pos.iloc[0]) else 0.0   # 起點建倉
+    win = win - cost
     curve = (1 + win).cumprod()
     return {
         "ret": float(curve.iloc[-1]) - 1,
         "sharpe": float(win.mean() / win.std() * (252 ** 0.5)) if float(win.std()) else 0.0,
         "dd": float((curve / curve.cummax() - 1).min()),
+        "switches": int(switch.sum()),
     }
 
 
@@ -239,6 +251,7 @@ def _evaluate(name, strat_name, universe, service, provider, top, common):
 
     symbols = resolve(universe)
     print(f"─── {name}（{service}，{len(symbols)} 檔）───", flush=True)
+    proxied = []
 
     bull = _bt(provider, strat_name, symbols, *BULL, **common)
     print(f"  關1 多頭 {BULL[0]}~{BULL[1]}：報酬 {bull.total_return:+.2%}｜"
@@ -259,6 +272,13 @@ def _evaluate(name, strat_name, universe, service, provider, top, common):
         print("  關3 訓練期選不出股票", flush=True)
     print("  全週期回測中（2021-07~2025-12，跨空頭+多頭）...", flush=True)
     full = _bt(provider, strat_name, symbols, *FULL, **common)
+    for tag, r_ in (("關1 多頭", bull), ("關2 空頭", bear), ("關3 WF", wf), ("全週期", full)):
+        if r_ is not None and getattr(r_, "regime_proxy", False):
+            proxied.append(tag)
+    if proxied:
+        print(f"  ⚠️ {'、'.join(proxied)} 的風向濾網是用**選股池等權代理**跑的，不是真 TAIEX。"
+              f"\n     這會實質改變結果（2026-09 實測 WF 夏普 0.27 ↔ -0.35），"
+              f"數字不可與別次比較。\n     先 rm data_cache/bm_*.pkl 再重跑。", flush=True)
     full_bh = _buy_hold(provider, *FULL)
     bull_bh = _buy_hold(provider, *BULL)
     bear_bh = _buy_hold(provider, *BEAR)
@@ -275,7 +295,7 @@ def _evaluate(name, strat_name, universe, service, provider, top, common):
         print(f"  對照組（同股池 {uni_bh['n']} 檔等權買進持有，不選股）全週期："
               f"{uni_bh['ret']:+.2%}（夏普 {uni_bh['sharpe']:.2f}／回撤 {uni_bh['dd']:.2%}）"
               f" → 選股貢獻 {ex:+.2%}", flush=True)
-    reg = _regime_only(provider, *FULL)
+    reg = _regime_only(provider, *FULL, fee_discount=common["fee_discount"])
     if reg:
         print(f"  對照組（不選股，只對大盤做年線濾網）全週期：{reg['ret']:+.2%}"
               f"（夏普 {reg['sharpe']:.2f}／回撤 {reg['dd']:.2%}）", flush=True)
@@ -386,7 +406,7 @@ def main():
         if rg:
             print(f"{'大盤+年線濾網':<18}{rg['ret']:>10.2%}"
                   f"{rg['ret'] - fb['ret']:>10.2%}{rg['sharpe']:>8.2f}{rg['dd']:>10.2%}"
-                  f"   ← 不選股的對照組")
+                  f"   ← 不選股，{rg.get('switches', 0)} 次進出（已扣成本）")
         for name in results:
             f_, fbh = results[name].get("full"), results[name].get("full_bh")
             if f_ is None or fbh is None:

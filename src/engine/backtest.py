@@ -42,6 +42,11 @@ class BacktestResult:
     equity_curve: pd.Series
     trades: List[Trade] = field(default_factory=list)
     initial_cash: float = 0.0
+    # 風向濾網是不是用「選股池等權平均」代替 TAIEX 跑的 (抓不到大盤時的備援)。
+    # 這件事會實質改變結果：2026-09 兩次重驗，只因為 TAIEX 快取被清掉、
+    # 濾網從代理換回真 TAIEX，lynch×tw50 的 WF 夏普就從 0.27 變成 -0.35。
+    # 以前只 print 一行警告，結果物件不留痕 → 兩次跑的數字不一樣卻找不到原因。
+    regime_proxy: bool = False
 
     # --- 績效指標 ---
     @property
@@ -152,10 +157,13 @@ class Backtester:
         bench_full = self.provider.benchmark(fetch_start, end)
         # TAIEX 抓不到 (逾時/限額) 但要用風向濾網時，用選股池等權平均自建大盤代理，
         # regime 照常運作、且完全不需額外 API 請求 (資料已在手)。
+        regime_proxy = False
         if self.regime_filter and bench_full is None:
             bench_full = self._synthetic_benchmark(data)
             if bench_full is not None:
-                print("[regime] ⚠️ 抓不到 TAIEX，改用選股池等權平均當大盤代理")
+                regime_proxy = True
+                print("[regime] ⚠️ 抓不到 TAIEX，改用選股池等權平均當大盤代理"
+                      "（結果會與用真 TAIEX 跑的不一樣，已記在 result.regime_proxy）")
 
         # 統一交易日曆 (所有股票日期聯集)。
         all_dates = sorted(set().union(*[set(df.index) for df in data.values() if not df.empty]))
@@ -229,7 +237,7 @@ class Backtester:
             equity.append((date, self._equity(broker, data, date)))
 
         curve = pd.Series(dict(equity)).sort_index()
-        return BacktestResult(curve, trades, self.initial_cash)
+        return BacktestResult(curve, trades, self.initial_cash, regime_proxy=regime_proxy)
 
     @staticmethod
     def _synthetic_benchmark(data: Dict[str, pd.DataFrame]) -> Optional[pd.Series]:
