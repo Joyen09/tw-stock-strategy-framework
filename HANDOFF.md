@@ -264,6 +264,11 @@ SHIOAJI_PERSON_ID=<你的身分證字號>   # 實際值只放 VM 的 .env，勿�
    ⚠️ 這張表有兩個前提要記住：(a) 只有一段歷史、一條路徑，年線濾網在盤整市
    會被巴來巴去，2021~2025 剛好只有一個乾淨的大波段，對它有利；
    (b) 年線對照組已扣手續費與證交稅，但沒算 ETF 的內扣費用（0050 約 0.32%/年）。
+   → **下一步：`tools/ma_filter_robustness.py`**（2026-09-22 新增，標準事前寫死）。
+   換均線長度（100/150/200/250）、換期間（滾動 3 年窗口）、單看盤整年（2015/2018），
+   看那條線站不站得住。三項全過=穩健；過 2 項=只能當降波動工具不是賺更多工具；
+   過 1 項以下=那 +68.81% 就是這段形狀給的運氣，結論回到「定期定額買指數」。
+   只打 1 次 API（抓一次長期 TAIEX、本地切窗口），不吃額度。
 1. ~~跑 `tools/revalidate_deployed.py` 重驗實盤三組設定~~（2026-09-17，✅ 已完成，結果見上）。
    第 2 節那些部署依據（lynch 夏普 1.51／回撤 -7.2%、mid100 WF +24.8%／夏普 1.31、
    livermore WF 測試 1.19）**全部跑在被暖身吃掉的窗口上，已失效**。停利驗證順便量到的
@@ -297,6 +302,7 @@ python main.py notify-test                            # 測通知（Telegram+Dis
 python tools/validate_lynch_buffer.py --universe tw50 # 策略參數改動的三關驗證（標準事前寫死）
 python tools/validate_take_profit.py --universe tw50  # 「賺 N% 就走」該不該開的三關驗證
 python tools/revalidate_deployed.py                   # 重驗實盤三組設定還站不站得住
+python tools/ma_filter_robustness.py                  # 年線濾網是真的還是這段歷史的運氣（只打 1 次 API）
 python tools/churn_check.py                           # 交易品質健檢（來回洗、持有天數、勝率）
 python tools/why_idle.py --strategy lynch --universe mid100 --paper-file paper_lynch_mid100.json --regime --max-positions 2 --budget 10000   # 帳戶為什麼沒交易
 ```
