@@ -86,6 +86,9 @@ SHIOAJI_PERSON_ID=<你的身分證字號>   # 實際值只放 VM 的 .env，勿�
 - `stockbot-livermore.timer`(14:20) + `stockbot-livermore.service`：livermore×tw50（獨立帳戶檔）
 - `stockbot-lynch-mid100.timer`(15:30) + `stockbot-lynch-mid100.service`：lynch×mid100（獨立帳戶檔）
 - `stockbot-discord-listen.service`：常駐 Discord bot 雙向控制（三帳戶）。**改 .env 後要 restart** 才生效。
+- `stockbot-dca.timer`(每月 5 號 14:30) + `stockbot-dca.service`：**第四帳戶，定期定額 0050**
+  → paper_dca.json。每月 1 萬、不看行情不選股不擇時。冪等（帳戶記 `last_dca_month`，
+  同月重跑自動略過），所以補跑或多跑都不會重複買。**當對照組跟前三個帳戶正面比。**
 - `stockbot-listen.service`：舊 Telegram listener（bot 凍結後停用；若申請新 token 可切回）。
 
 **通知多通道化（2026-07-06，Telegram bot 遭凍結後）**：`src/notify/` 改為 Telegram+Discord
@@ -325,6 +328,7 @@ python tools/validate_take_profit.py --universe tw50  # 「賺 N% 就走」該�
 python tools/revalidate_deployed.py                   # 重驗實盤三組設定還站不站得住
 python tools/ma_filter_robustness.py                  # 年線濾網是真的還是這段歷史的運氣（只打 1 次 API）
 python tools/dca_compare.py                           # 定期定額要不要加均線濾網（只打 1 次 API）
+python main.py dca --symbol 0050 --amount 10000 --paper-file paper_dca.json --notify   # 第四帳戶：定期定額（每月扣一次，冪等）
 python tools/churn_check.py                           # 交易品質健檢（來回洗、持有天數、勝率）
 python tools/why_idle.py --strategy lynch --universe mid100 --paper-file paper_lynch_mid100.json --regime --max-positions 2 --budget 10000   # 帳戶為什麼沒交易
 ```

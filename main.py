@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import date
+from datetime import date, timedelta
 
 
 def _today() -> str:
@@ -460,6 +460,99 @@ def cmd_listen(args):
         print("\n已停止監聽。")
 
 
+def dca_shares(amount: float, price: float, fee_discount: float) -> int:
+    """在 amount 元的預算內最多能買幾股（含最低 20 元手續費）。
+
+    小額定期定額的手續費是「最低 20 元」在主導，不是費率：
+    每月 1 萬的實際成本是 0.2%，而不是費率算出來的 0.04%（差五倍）。
+    直接用 amount/price 會因為漏算手續費而下出買不起的單（買單全有全無，
+    會整筆不成交——而且那個失敗過去是靜默的，見 HANDOFF 注意事項 22）。
+    """
+    from src.broker import fees
+
+    if price <= 0:
+        return 0
+    shares = int(amount // price)
+    while shares > 0 and fees.buy_cost(shares * price, fee_discount) > amount:
+        shares -= 1
+    return shares
+
+
+def cmd_dca(args):
+    """定期定額：每月固定金額買進指定標的 (預設 0050)，不看行情、不選股、不擇時。
+
+    為什麼是這個：2026-10 的驗證結論——選股那一層在 tw50 是負貢獻、均線濾網
+    對定期定額幾乎沒作用（跳過 60 次扣款，回撤只改善 0.3 個百分點、報酬還略差）。
+    規則愈少愈不會壞、也愈不會被自己的手改掉。
+
+    冪等：帳戶記住扣款到哪一個月 (last_dca_month)，同一個月重跑不會重複買進。
+    """
+    from datetime import date as _date
+
+    from src.broker.persistent_paper import PersistentPaperBroker
+    from src.broker.base import Order, OrderSide
+    from src.notify import build_notifier
+
+    end = args.end or _today()
+    month = end[:7]
+    root = os.path.dirname(os.path.abspath(__file__))
+    broker = PersistentPaperBroker(path=os.path.join(root, args.paper_file), cash=0.0)
+    notifier = build_notifier() if args.notify else None
+
+    if getattr(broker, "last_dca_month", None) == month and not args.force:
+        msg = f"⏭ {month} 已經扣款過了，略過（要強制再買一次用 --force）"
+        print(msg)
+        return
+
+    provider = _provider(args)
+    start = (date.fromisoformat(end) - timedelta(days=30)).isoformat()
+    df = provider.history(args.symbol, start, end)
+    if df is None or df.empty:
+        print(f"❌ 抓不到 {args.symbol} 的價格，本次不扣款（下次排程會再試）")
+        return
+    price = float(df["close"].iloc[-1])
+
+    # 先「入帳」再買，跟真實的定期定額一樣：每月薪水撥一筆進來，然後買進。
+    # initial_cash 跟著累加，report 算的「報酬率」才會是「總損益 / 總投入」。
+    # 不這樣做而是期初一次放一大筆的話，第一次扣款就會把整個餘額買光。
+    broker.account.cash += args.amount
+    broker.initial_cash = getattr(broker, "initial_cash", 0.0) + args.amount
+    deposited = broker.initial_cash
+
+    shares = dca_shares(broker.cash(), price, args.fee_discount)
+    if shares <= 0:
+        broker._save()   # 錢已經入帳了，一定要落地，否則這個月的投入會憑空消失
+        print(f"⚠️ 現金 {broker.cash():,.0f} 買不起 1 股 {args.symbol}"
+              f"（現價 {price:,.2f}）；錢留在帳上，下個月累積後再買。")
+        broker.last_dca_month = month
+        broker._save()
+        return
+
+    order = broker.place_order(Order(args.symbol, OrderSide.BUY, shares, price,
+                                     f"定期定額 {month}"))
+    if not getattr(order, "filled", False):
+        print(f"⚠️ 未成交：{order.note}")
+        return
+    broker.last_dca_month = month
+    broker._save()
+
+    pos = next((p for p in broker.positions() if p.symbol == args.symbol), None)
+    line = (f"🧾 定期定額 {month}｜投入 {args.amount:,.0f}，買進 {args.symbol} "
+            f"{shares} 股 @ {price:,.2f}")
+    held = ""
+    if pos:
+        value = pos.shares * price + broker.cash()
+        held = (f"　累積 {pos.shares} 股、均價 {pos.avg_price:,.2f}｜現金 {broker.cash():,.0f}"
+                f"\n　總投入 {deposited:,.0f}｜市值 {value:,.0f}"
+                f"（{value / deposited - 1:+.2%}）")
+    print(line)
+    if held:
+        print(held)
+    if notifier and getattr(notifier, "enabled", False):
+        notifier.send(f"{line}\n{held}")
+        print("（已推送到通知頻道）")
+
+
 def cmd_report(args):
     """模擬盤績效報告：用最新收盤價把各帳戶市值化，算報酬率/未實現損益（免監聽也能看）。"""
     from src.control import handle_broker_command, _try_broker
@@ -664,6 +757,17 @@ def build_parser():
                     help="模擬盤帳戶，逗號分隔可多個、可帶標籤 (標籤=檔名)")
     rp.add_argument("--notify", action="store_true", help="把績效報告推到通知頻道 (Discord/Telegram)")
     rp.set_defaults(func=cmd_report)
+
+    dc = sub.add_parser("dca", help="定期定額買進 (預設 0050)：不看行情、不選股、不擇時")
+    dc.add_argument("--symbol", default="0050", help="標的 (預設 0050；006208 內扣費用更低)")
+    dc.add_argument("--amount", type=float, default=10_000, help="每月投入金額")
+    dc.add_argument("--paper-file", default="paper_dca.json", help="模擬盤帳戶檔")
+    dc.add_argument("--fee-discount", type=float, default=0.28, help="手續費折扣")
+    dc.add_argument("--source", default="finmind", choices=["finmind", "sample"])
+    dc.add_argument("--end", default="", help="扣款日 (預設今天)")
+    dc.add_argument("--notify", action="store_true", help="推送到通知頻道")
+    dc.add_argument("--force", action="store_true", help="同一個月強制再買一次 (預設會略過)")
+    dc.set_defaults(func=cmd_dca)
 
     sub.add_parser("notify-test", help="送一則 Telegram 測試訊息").set_defaults(func=cmd_notify_test)
     sub.add_parser("notify-chatid", help="查詢自己的 Telegram chat_id").set_defaults(func=cmd_notify_chatid)

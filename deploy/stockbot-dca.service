@@ -1,0 +1,29 @@
+# systemd 服務：定期定額買進 0050（模擬盤、假錢）。
+#
+# 為什麼是這個：2026-10 的驗證結論——選股那層在 tw50 是負貢獻（-14.64%），
+# 均線濾網對定期定額幾乎沒作用（跳過 60 次扣款，回撤只改善 0.3pp、報酬還略差）。
+# 所以這支刻意做到最笨：每月固定金額買一次，不看行情、不選股、不擇時。
+# 它當第四個模擬帳戶，跟 lynch / livermore / lynch-mid100 正面對照。
+#
+# 安裝：
+#   sed "s/YOUR_USER/$(whoami)/g" deploy/stockbot-dca.service | sudo tee /etc/systemd/system/stockbot-dca.service
+#   sudo cp deploy/stockbot-dca.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now stockbot-dca.timer
+#   systemctl list-timers stockbot-dca.timer        # 確認下次扣款時間
+#   sudo systemctl start stockbot-dca.service       # 想立刻扣第一筆
+[Unit]
+Description=Taiwan stock bot - monthly DCA into 0050 (paper)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/stock
+EnvironmentFile=-/home/YOUR_USER/stock/.env
+# 每月扣款一次具冪等性（帳戶記 last_dca_month），同月重跑會自己略過
+ExecStart=/home/YOUR_USER/stock/.venv/bin/python main.py dca --symbol 0050 --amount 10000 --paper-file paper_dca.json --notify
+MemoryMax=300M
+
+[Install]
+WantedBy=multi-user.target

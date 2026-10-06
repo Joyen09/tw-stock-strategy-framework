@@ -1,0 +1,13 @@
+# 每月 5 號 14:30 扣款一次（盤後，確保當天收盤價已更新）。
+# 5 號而不是 1 號：遇到連假 1~4 號可能沒有交易日資料。
+# 冪等由帳戶的 last_dca_month 負責，所以補跑或多跑都不會重複買。
+[Unit]
+Description=Monthly DCA timer (paper)
+
+[Timer]
+OnCalendar=*-*-05 14:30:00
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

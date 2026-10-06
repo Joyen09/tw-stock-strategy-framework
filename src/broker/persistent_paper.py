@@ -62,6 +62,7 @@ class PersistentPaperBroker(PaperBroker):
         self.start_date = None  # 帳戶起算日 (算「同期大盤報酬」對照用)；舊檔沒存就下次存檔補今天
         self.trades = []  # 成交紀錄 (跨執行持久化)；沒有它就無法回答「錢是怎麼虧的」
         self.last_ca_date = None  # 除權息處理到哪一天 (冪等用，見 apply_corporate_actions)
+        self.last_dca_month = None  # 定期定額扣款到哪一個月 "YYYY-MM" (冪等用，見 main.py cmd_dca)
         if not os.path.exists(self.path):
             return  # 首次執行：用建構子的初始 cash、空持倉
         try:
@@ -89,6 +90,7 @@ class PersistentPaperBroker(PaperBroker):
         self.start_date = _valid_date(data.get("start_date"))
         self.trades = list(data.get("trades", []))
         self.last_ca_date = data.get("last_ca_date")
+        self.last_dca_month = data.get("last_dca_month")
 
     def _save(self) -> None:
         data = {
@@ -102,6 +104,7 @@ class PersistentPaperBroker(PaperBroker):
             ],
             "trades": getattr(self, "trades", [])[-MAX_TRADES:],
             "last_ca_date": getattr(self, "last_ca_date", None),
+            "last_dca_month": getattr(self, "last_dca_month", None),
         }
         # 原子寫入：先寫暫存檔再 rename，避免排程當中被中斷寫壞檔案。
         tmp = self.path + ".tmp"

@@ -150,6 +150,13 @@ def _dd(curve) -> float:
     return float((curve / curve.cummax() - 1).min())
 
 
+def _pad(text: str, width: int) -> str:
+    """靠左補到指定「顯示寬度」。中文在終端機算兩格，用 len() 補會排不齊。"""
+    import unicodedata
+    w = sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+    return text + " " * max(width - w, 0)
+
+
 def main():
     ap = argparse.ArgumentParser(description="定期定額要不要加均線濾網（標準先寫死）")
     ap.add_argument("--start", default="2008-01-01")
@@ -191,23 +198,28 @@ def main():
 
     months = n_p + 0  # 純定期定額每個月都買，次數=扣款月數
     rows = [
-        ("純定期定額", plain, inv_p, f"{n_p} 次買進"),
-        (f"定期定額+{args.ma}日濾網", filt, inv_f, f"{n_f} 次買進／跳過 {skip_f} 次"),
-        ("期初一次買進", lump, inv_l, "1 次買進（對照）"),
+        ("純定期定額", plain, inv_p, False, f"{n_p} 次買進"),
+        (f"定期定額+{args.ma}MA", filt, inv_f, False, f"{n_f} 次買進、跳過 {skip_f} 次"),
+        ("期初一次買進", lump, inv_l, True, "1 次買進（對照組）"),
     ]
 
-    print("=" * 84)
+    print("=" * 72)
     print(f"每月投入 {args.monthly:,.0f} 元，共 {months} 個月（總投入 {inv_p:,.0f}）")
-    print(f"{'版本':<22}{'期末市值':>12}{'倍數':>8}{'年化':>8}{'最大回撤':>10}  說明")
-    print("-" * 84)
-    for tag, curve, inv, note in rows:
+    print(f"{_pad('版本', 20)}{'期末市值':>13}{'倍數':>7}{'年化':>8}{'回撤':>9}")
+    print("-" * 72)
+    notes = []
+    for tag, curve, inv, is_lump, note in rows:
         final = float(curve.iloc[-1])
         mult = final / inv if inv else float("nan")
-        if tag == "期初一次買進":
-            cagr = (final / inv) ** (1 / years) - 1
-        else:
-            cagr = _irr(curve, args.monthly, months, years)
-        print(f"{tag:<22}{final:>12,.0f}{mult:>8.2f}{cagr:>8.2%}{_dd(curve):>10.1%}  {note}")
+        # 一次買進的錢是期初全額投入 → 用時間加權；定期定額要用資金加權 IRR
+        cagr = ((final / inv) ** (1 / years) - 1) if is_lump else _irr(curve, args.monthly, months, years)
+        print(f"{_pad(tag, 20)}{final:>13,.0f}{mult:>7.2f}{cagr:>8.2%}{_dd(curve):>9.1%}")
+        notes.append(f"  {tag}：{note}")
+    # 說明另外列，不要接在表格後面——中文是雙寬字元，接上去會超過終端寬度，
+    # 折行時把前面的欄位蓋掉（2026-10 實測輸出變成「定跳過 60 次日濾網」）。
+    print()
+    for n in notes:
+        print(n)
 
     # ── 判定 ──
     mult_p = float(plain.iloc[-1]) / inv_p
