@@ -178,3 +178,38 @@ def test_load_options_filters_session_and_weeklies():
     out = bt._load_options(api, "2026-09-01", "2026-09-05")
     assert set(out["trading_session"]) == {"position"}
     assert set(out["contract_date"].astype(str)) == {"202609"}
+
+# ── 原始 vs 維持保證金 ──
+
+def test_initial_and_maintenance_margins_are_tracked_separately():
+    """期交所的 A/B 值有三欄，用途不同：原始=建倉要擺的錢、維持=跌破就追繳。
+    混用會讓「會不會爆倉」整個判錯，所以兩者必須分開算、分開報。"""
+    dates = pd.bdate_range("2026-08-03", "2026-09-16")
+    legs = [("call", 43_500, 120.0, 500), ("put", 38_500, 95.0, 500)]
+    res = bt.backtest(_chain(dates, legs), _index(dates, 41_000, 41_400), 0.05, 500_000,
+                      a_val=187_000, b_val=94_000, maint_a=143_000, maint_b=72_000)
+    row = res.iloc[0]
+    assert row["原始保證金"] > row["維持保證金"] > 0
+
+
+def test_maintenance_defaults_are_not_silently_zero():
+    """沒給維持保證金時不可以算成 0——那會讓「永遠不會被追繳」憑空成立。"""
+    dates = pd.bdate_range("2026-08-03", "2026-09-16")
+    legs = [("call", 43_500, 120.0, 500), ("put", 38_500, 95.0, 500)]
+    res = bt.backtest(_chain(dates, legs), _index(dates, 41_000, 41_400), 0.05, 500_000,
+                      a_val=187_000, b_val=94_000)       # 只給原始
+    assert res.iloc[0]["維持保證金"] == 0                  # 函式層面確實沒算
+    # 但 main() 會把維持回填成原始值（偏嚴），所以實際使用不會出現 0。
+    # 這個測試的用意是鎖住「0 是『沒算』而不是『不用錢』」這個語意。
+
+
+def test_margin_is_summed_per_leg_not_discounted():
+    """勒式在期交所有組合式保證金可減收，本檔刻意不減——高估保證金會讓判定
+    偏向不通過，是保守的方向。若哪天改成減收，這個測試要一起改並說明理由。"""
+    dates = pd.bdate_range("2026-08-03", "2026-09-16")
+    legs = [("call", 43_500, 120.0, 500), ("put", 38_500, 95.0, 500)]
+    res = bt.backtest(_chain(dates, legs), _index(dates, 41_000, 41_000), 0.05, 500_000,
+                      a_val=187_000, b_val=94_000, maint_a=143_000, maint_b=72_000)
+    one_leg = bt._margin(120.0, 43_500 - 41_000, 187_000, 94_000)
+    other = bt._margin(95.0, 41_000 - 38_500, 187_000, 94_000)
+    assert res.iloc[0]["原始保證金"] == pytest.approx(one_leg + other, abs=1)

@@ -44,7 +44,9 @@ D. 最壞單月虧損 <= 權益的 `MAX_MONTH_LOSS`
 
 用法：
     # 先去期交所查「選擇權風險保證金 A值/B值」填進去（會隨市況調整）
-    .venv/bin/python tools/txo_short_backtest.py --margin-a 28000 --margin-b 14000
+    # 2026-10 期交所公告值（會調整，用前務必自己對一次）
+    .venv/bin/python tools/txo_short_backtest.py \
+        --margin-a 187000 --margin-b 94000 --maint-a 143000 --maint-b 72000
     .venv/bin/python tools/txo_short_backtest.py          # 不給保證金 → 只看損益，不判定
 """
 from __future__ import annotations
@@ -123,17 +125,29 @@ def _load_options(api, start, end):
 
 
 def _margin(premium_pts: float, otm_pts: float, a_val: float, b_val: float) -> float:
-    """選擇權賣方保證金 = 權利金市值 + MAX(A值 - 價外值, B值)。
+    """單口選擇權賣方保證金 = 權利金市值 + MAX(A值 - 價外值, B值)。
 
     價外值 = 價外點數 × 契約乘數。A/B 值由期交所公告、會隨市況調整，
     所以本檔不內建預設值——用錯的保證金去算「會不會爆倉」比不算更危險。
+
+    ⚠️ 期交所的 A/B 值有三個欄位，用途不同，不可混用：
+      原始保證金：**建倉**當下要擺進去的錢
+      維持保證金：帳戶權益低於它就**追繳**（這才是「會不會爆倉」那一關）
+      結算保證金：給結算會員用的，散戶用不到
+    本檔分別收 (margin_a/b)=原始 與 (maint_a/b)=維持。
+
+    ⚠️ 勒式（同時賣 call+put）在期交所有「組合式保證金」可以減收，本檔**刻意
+    不減**、直接把兩腳相加。這會高估保證金需求，讓判定偏向「不通過」——
+    保守的方向。真要採用時得先向期交所/券商確認實際收法，否則別反過來用
+    這個數字去論證「保證金很夠」。
     """
     otm_value = max(otm_pts, 0.0) * MULTIPLIER
     return premium_pts * MULTIPLIER + max(a_val - otm_value, b_val)
 
 
 def backtest(opt, index, otm_pct: float, equity: float,
-             a_val: float | None, b_val: float | None):
+             a_val: float | None, b_val: float | None,
+             maint_a: float | None = None, maint_b: float | None = None):
     """每月賣一組價外勒式，持有到到期。回傳每月明細與每日評價。"""
     import pandas as pd
 
@@ -172,7 +186,7 @@ def backtest(opt, index, otm_pct: float, equity: float,
 
         # 每日評價（用結算價，冷門履約價 close=0 會憑空生出獲利）
         held = chain[(chain["date"] >= entry) & (chain["date"] <= exp)]
-        worst_day, peak_margin = 0.0, 0.0
+        worst_day, peak_initial, peak_maint = 0.0, 0.0, 0.0
         for d, grp in held.groupby("date"):
             def mark(leg):
                 m = grp[(grp["call_put"] == leg["call_put"])
@@ -183,11 +197,17 @@ def backtest(opt, index, otm_pct: float, equity: float,
                 return sp if sp > 0 else float(m.iloc[0]["close"])
             mtm_pts = mark(c) + mark(p)
             worst_day = min(worst_day, gross - spread - costs - mtm_pts * MULTIPLIER)
+            s_d = index.asof(d)
+            c_otm = float(c["strike_price"]) - s_d          # call 價外點數
+            p_otm = s_d - float(p["strike_price"])          # put 價外點數
             if a_val is not None and b_val is not None:
-                s_d = index.asof(d)
-                need = (_margin(mark(c), float(c["strike_price"]) - s_d, a_val, b_val)
-                        + _margin(mark(p), s_d - float(p["strike_price"]), a_val, b_val))
-                peak_margin = max(peak_margin, need)
+                peak_initial = max(peak_initial,
+                                   _margin(mark(c), c_otm, a_val, b_val)
+                                   + _margin(mark(p), p_otm, a_val, b_val))
+            if maint_a is not None and maint_b is not None:
+                peak_maint = max(peak_maint,
+                                 _margin(mark(c), c_otm, maint_a, maint_b)
+                                 + _margin(mark(p), p_otm, maint_a, maint_b))
             daily.append({"date": d, "month": ym})
         # 到期結算也是一種「評價」，而且常常就是最壞的那一個。
         # 第一版只看持有期間的每日評價，於是「最壞單日評價」會遠小於實際的
@@ -199,7 +219,8 @@ def backtest(opt, index, otm_pct: float, equity: float,
             "指數": round(float(s0)), "到期指數": round(float(s_exp)),
             "call履約": int(c["strike_price"]), "put履約": int(p["strike_price"]),
             "權利金": round(gross), "賠付": round(payoff), "損益": round(pnl),
-            "最壞評價": round(worst_day), "最高保證金": round(peak_margin),
+            "最壞評價": round(worst_day),
+            "原始保證金": round(peak_initial), "維持保證金": round(peak_maint),
         })
     return pd.DataFrame(rows)
 
@@ -210,8 +231,14 @@ def main():
     ap.add_argument("--end", default="2026-09-30")
     ap.add_argument("--otm", type=float, default=0.05, help="價外幅度（0.05 = 5%%）")
     ap.add_argument("--equity", type=float, default=500_000, help="帳戶權益（算爆倉用）")
-    ap.add_argument("--margin-a", type=float, default=None, help="期交所公告 A 值")
-    ap.add_argument("--margin-b", type=float, default=None, help="期交所公告 B 值")
+    ap.add_argument("--margin-a", type=float, default=None,
+                    help="臺指選擇權風險保證金(A)值・**原始保證金**欄（建倉要擺的錢）")
+    ap.add_argument("--margin-b", type=float, default=None,
+                    help="臺指選擇權風險保證金(B)值・**原始保證金**欄")
+    ap.add_argument("--maint-a", type=float, default=None,
+                    help="(A)值的**維持保證金**欄（跌破就追繳；不給則沿用原始值，偏嚴）")
+    ap.add_argument("--maint-b", type=float, default=None,
+                    help="(B)值的**維持保證金**欄")
     args = ap.parse_args()
 
     import pandas as pd
@@ -240,7 +267,11 @@ def main():
         return 1
     print(f"月選主時段 {len(opt):,} 列\n")
 
-    res = backtest(opt, index, args.otm, args.equity, args.margin_a, args.margin_b)
+    # 沒給維持保證金就沿用原始值。原始 > 維持，所以追繳會判得比實際更嚴 —— 偏保守。
+    maint_a = args.maint_a if args.maint_a is not None else args.margin_a
+    maint_b = args.maint_b if args.maint_b is not None else args.margin_b
+    res = backtest(opt, index, args.otm, args.equity,
+                   args.margin_a, args.margin_b, maint_a, maint_b)
     if res.empty:
         print("❌ 建不出任何部位（可能價外幅度太遠、或資料不足）。")
         return 1
@@ -267,20 +298,29 @@ def main():
         print("   追繳發生那天帳戶就結束了，但回測會若無其事地繼續交易下去，")
         print("   於是「平均報酬」照樣漂亮。沒有保證金就算不出這一關，")
         print("   給半套判定只會讓人誤以為驗證過了。")
-        print("\n   去期交所抄「選擇權風險保證金 A值／B值」（會隨市況調整），再跑一次：")
-        print("   .venv/bin/python tools/txo_short_backtest.py --margin-a <A> --margin-b <B>")
+        print("\n   去期交所抄「臺指選擇權風險保證金(A)值／(B)值」（會隨市況調整）再跑一次。")
+        print("   那張表有三欄、用途不同，別抄錯：")
+        print("     原始保證金 = 建倉當下要擺進去的錢")
+        print("     維持保證金 = 權益跌破它就被追繳（「會不會爆倉」看這個）")
+        print("     結算保證金 = 結算會員用的，散戶用不到")
+        print("   .venv/bin/python tools/txo_short_backtest.py \\")
+        print("       --margin-a <A原始> --margin-b <B原始> \\")
+        print("       --maint-a <A維持> --maint-b <B維持>")
         print(f"\n   先看得到的部分：最壞單月 {worst_m:+,.0f}、最壞單日評價 {worst_d:+,.0f}。")
         print(f"   光這個數字就已經是權益的 {abs(worst_d) / args.equity:.0%}——"
               f"而真實世界還要加上追繳。")
         return 0
 
-    peak = res["最高保證金"].max()
+    peak_init = res["原始保證金"].max()
+    peak_maint = res["維持保證金"].max()
     checks = [
         (f"A 樣本 >= {CRITERIA['min_months']} 個月", len(res) >= CRITERIA["min_months"],
          f"{len(res)} 個月"),
         ("B 扣成本後總損益 > 0", total > CRITERIA["min_total_pnl"], f"{total:+,.0f}"),
-        ("C 任何一天都沒有保證金不足", peak <= args.equity,
-         f"最高需要 {peak:,.0f} / 權益 {args.equity:,.0f}"),
+        ("C 任何一天都沒被追繳（權益 >= 維持保證金）", peak_maint <= args.equity,
+         f"維持保證金最高 {peak_maint:,.0f} / 權益 {args.equity:,.0f}"),
+        ("C2 建倉時擺得出原始保證金", peak_init <= args.equity,
+         f"原始保證金最高 {peak_init:,.0f} / 權益 {args.equity:,.0f}"),
         (f"D 最壞單月虧損 <= 權益的 {CRITERIA['max_month_loss']:.0%}",
          worst_m >= -args.equity * CRITERIA["max_month_loss"],
          f"{worst_m:+,.0f}（{worst_m / args.equity:+.1%}）"),

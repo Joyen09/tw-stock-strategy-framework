@@ -332,7 +332,7 @@ python main.py dca --symbol 0050 --amount 10000 --paper-file paper_dca.json --no
 python tools/dip_add_compare.py                       # 衛星層①機械式逢跌加碼值不值得（只打 1 次 API）
 python tools/txo_data_probe.py                        # 衛星層②選擇權：先確認資料拿不拿得到
 python tools/txo_data_survey.py                       # 選擇權資料品質盤點（寫回測前必跑）
-python tools/txo_short_backtest.py --margin-a <A> --margin-b <B>   # 賣價外月選回測（沒給保證金會拒絕判定）
+python tools/txo_short_backtest.py --margin-a 187000 --margin-b 94000 --maint-a 143000 --maint-b 72000   # 賣價外月選回測（沒給保證金會拒絕判定）
 python tools/churn_check.py                           # 交易品質健檢（來回洗、持有天數、勝率）
 python tools/why_idle.py --strategy lynch --universe mid100 --paper-file paper_lynch_mid100.json --regime --max-positions 2 --budget 10000   # 帳戶為什麼沒交易
 ```
@@ -491,6 +491,20 @@ deploy/               # systemd: stockbot(lynch-tw50) / stockbot-livermore / sto
     繼續交易，於是「平均報酬」照樣漂亮。給半套判定會讓人誤以為驗證過了。
     ⚠️ A值/B值要去期交所抄（會隨市況調整）。**Claude 的容器被 egress proxy
     擋住 taifex.com.tw，抄不到，這一步只能由使用者做。**
+    ✅ 2026-10 使用者查到的值（**用前務必自己再對一次，期交所會調整**）：
+    ```
+    臺指選擇權風險保證金   結算      維持      原始
+      (A)值             138,000  143,000  187,000
+      (B)值              69,000   72,000   94,000
+      (C)值              13,800   14,400   18,800
+    ```
+    三欄用途不同，**混用會讓「會不會爆倉」整個判錯**：
+    原始=建倉要擺的錢｜維持=權益跌破就追繳（爆倉看這個）｜結算=結算會員用、散戶無關。
+    工具已拆成 `--margin-a/--margin-b`（原始）與 `--maint-a/--maint-b`（維持）。
+    C值在單腳公式用不到（公式是 權利金市值 + MAX(A - 價外值, B)）；它用在組合部位，
+    真要用再向期交所/券商確認。
+    ⚠️ 勒式在期交所有**組合式保證金可減收**，本檔刻意不減、兩腳相加 → 高估保證金、
+    判定偏向不通過（保守方向）。不可反過來拿這個數字論證「保證金很夠」。
     ⚠️ 已知近似：用加權指數收盤價當標的與到期結算價（真實 TXO 結算價是到期日
     開盤集合競價平均），且忽略期現基差與盤中追繳 → 結果只能當量級參考。
 - 新策略一律先過三關再談部署。別急著上真錢。
