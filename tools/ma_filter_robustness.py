@@ -73,33 +73,42 @@ def _simulate(close, ma_window: int, fee_discount: float):
     from src.broker import fees
 
     ma = close.rolling(ma_window).mean()
-    pos = (close >= ma).shift(1).fillna(False).astype(bool)   # 次日才生效
+    pos = (close >= ma).shift(1, fill_value=False).astype(bool)   # 次日才生效
     ret = close.pct_change().fillna(0.0)
     buy_rate = fees.BROKER_FEE_RATE * fee_discount
     sell_rate = fees.BROKER_FEE_RATE * fee_discount + fees.TAX_RATE
-    switch = pos.ne(pos.shift(1).fillna(False))
+    switch = pos.ne(pos.shift(1, fill_value=False))
     cost = switch.astype(float) * pos.map(lambda x: buy_rate if x else sell_rate)
     return ret * pos.astype(float) - cost, pos, switch
 
 
 def _stats(daily_ret):
-    """由每日報酬算 報酬／夏普／最大回撤。"""
+    """由每日報酬算 報酬／年化報酬／夏普／最大回撤。
+
+    為什麼一定要有年化：18.76 年的累積報酬差 -74.6% 聽起來像災難，
+    換成年化只有 -0.78 個百分點。**同一組數字，兩種結論。**
+    長期比較只看累積數字會嚴重誤導自己。
+    """
     if daily_ret is None or len(daily_ret) < 2:
         return None
     curve = (1 + daily_ret).cumprod()
     sd = float(daily_ret.std())
+    total = float(curve.iloc[-1]) - 1
+    years = (daily_ret.index[-1] - daily_ret.index[0]).days / 365.25
     return {
-        "ret": float(curve.iloc[-1]) - 1,
+        "ret": total,
+        "cagr": (1 + total) ** (1 / years) - 1 if years > 0 and total > -1 else float("nan"),
         "sharpe": float(daily_ret.mean() / sd * (252 ** 0.5)) if sd else 0.0,
         "dd": float((curve / curve.cummax() - 1).min()),
     }
 
 
 def _row(tag, st, bh, switches=None):
-    ex = st["ret"] - bh["ret"]
     dd_gain = st["dd"] - bh["dd"]      # 正值 = 回撤比較淺（改善）
     sw = f"{switches:>6}" if switches is not None else f"{'—':>6}"
-    return (f"{tag:<16}{st['ret']:>9.1%}{ex:>9.1%}{st['sharpe']:>7.2f}"
+    # 年化差才是該看的那個數字（見 _stats docstring）
+    return (f"{tag:<16}{st['ret']:>9.1%}{st['cagr']:>8.2%}"
+            f"{st['cagr'] - bh['cagr']:>+9.2%}{st['sharpe']:>7.2f}"
             f"{st['dd']:>9.1%}{dd_gain:>+9.1%}{sw}")
 
 
@@ -136,7 +145,8 @@ def main():
     print(f"拿到 {len(close)} 根，{close.index[0].date()} ~ {close.index[-1].date()}\n")
 
     bh_daily = close.pct_change().fillna(0.0)
-    hdr = f"{'':<16}{'報酬':>9}{'超額':>9}{'夏普':>7}{'回撤':>9}{'回撤改善':>9}{'進出':>6}"
+    hdr = (f"{'':<16}{'累積報酬':>9}{'年化':>8}{'年化差':>9}{'夏普':>7}"
+           f"{'回撤':>9}{'回撤改善':>9}{'進出':>6}")
 
     # ── 測試 1：換均線長度 ──
     print("=" * 78)
@@ -214,7 +224,10 @@ def main():
     elif passed == 2:
         print("🟡 過 2 項 → 有條件成立：**當降波動工具可以，當賺更多工具不行。**")
         print("   也就是說它的價值是「睡得著覺」，不是「賺更多」。")
-        print("   要不要為了這個付出多年的紀律，是你的偏好問題，不是數學問題。")
+        print("   ⚠️ 判斷代價時看『年化差』那一欄，不要看累積報酬——")
+        print("   十幾年的累積差額看起來很恐怖，換成年化通常只有不到 1 個百分點。")
+        print("   要不要用那不到 1 個百分點去換「回撤砍半」，是你的偏好問題，")
+        print("   不是數學問題。數學只能告訴你價碼，付不付由你決定。")
     else:
         print("🔴 只過 {} 項 → 那 +68.81% 主要是 2021~2025 這段形狀給的運氣。".format(passed))
         print("   均線濾網在盤整年會被來回巴，這次剛好避開了。**不要當真。**")

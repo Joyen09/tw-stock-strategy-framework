@@ -131,7 +131,7 @@ def _regime_only(provider, start, end, ma_window=200, fee_discount=0.28):
     inpos = (s >= ma)                      # 當日收盤站上年線 → 持有
     ret = s.pct_change().fillna(0.0)
     # 當日決策、次日生效（shift 1），避免用當天的收盤決定當天的部位
-    strat_ret = ret * inpos.shift(1).fillna(False).astype(float)
+    strat_ret = ret * inpos.shift(1, fill_value=False).astype(float)
     win = strat_ret.loc[start:end]
     if win.empty:
         return None
@@ -141,8 +141,8 @@ def _regime_only(provider, start, end, ma_window=200, fee_discount=0.28):
 
     buy_rate = fees.BROKER_FEE_RATE * fee_discount
     sell_rate = fees.BROKER_FEE_RATE * fee_discount + fees.TAX_RATE
-    pos = inpos.shift(1).fillna(False).astype(bool).loc[start:end]
-    switch = pos.ne(pos.shift(1).fillna(False))
+    pos = inpos.shift(1, fill_value=False).astype(bool).loc[start:end]
+    switch = pos.ne(pos.shift(1, fill_value=False))
     cost = switch.astype(float) * pos.map(lambda x: buy_rate if x else sell_rate)
     cost.iloc[0] = buy_rate if bool(pos.iloc[0]) else 0.0   # 起點建倉
     win = win - cost
