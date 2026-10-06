@@ -332,6 +332,7 @@ python main.py dca --symbol 0050 --amount 10000 --paper-file paper_dca.json --no
 python tools/dip_add_compare.py                       # 衛星層①機械式逢跌加碼值不值得（只打 1 次 API）
 python tools/txo_data_probe.py                        # 衛星層②選擇權：先確認資料拿不拿得到
 python tools/txo_data_survey.py                       # 選擇權資料品質盤點（寫回測前必跑）
+python tools/txo_short_backtest.py --margin-a <A> --margin-b <B>   # 賣價外月選回測（沒給保證金會拒絕判定）
 python tools/churn_check.py                           # 交易品質健檢（來回洗、持有天數、勝率）
 python tools/why_idle.py --strategy lynch --universe mid100 --paper-file paper_lynch_mid100.json --regime --max-positions 2 --budget 10000   # 帳戶為什麼沒交易
 ```
@@ -474,6 +475,24 @@ deploy/               # systemd: stockbot(lynch-tw50) / stockbot-livermore / sto
     4. 🔴 **沒有 bid/ask，只有 OHLC 與結算價。** 選擇權價差極寬（價外常達權利金
        的 10~30%），用收盤價假設賣得掉會**系統性高估賣方收益**——這對「賣選擇權」
        是最致命的偏差。價差成本必須事前寫進標準，不可看到結果再調鬆。
+    ✅ **盤點實測（2026-10-06，跨 2022-10／2024-01／2025-06／2026-09 四個月）**：
+    - 主時段叫 **`position`**（51.1%）vs `after_market`（48.9%）——**不是** `regular_trading`
+    - 月選 71.3%、週選 28.7%（代號 `202210W1` 這種）→ 先只做月選
+    - 真的可交易（量>0 且價>0）只有 **37.1%**，但**平均每天仍有 513 個**履約價
+      （255~1137）→ 流動性足以支撐賣價外策略
+    - `settlement_price` 只有 4.5% 是 0 → **可用，而且評價要用它而不是 close**
+      （冷門履約價 close=0，拿它評價會把空頭部位當成一文不值、憑空生出獲利）
+    → 已寫 `tools/txo_short_backtest.py`：賣價外月選勒式、持有到到期。
+    **判定主角是尾部不是平均報酬**：C 任何一天不得保證金不足（一次就淘汰）、
+    D 最壞單月虧損 <= 權益 20%；B 總損益>0 只是門票。
+    價差成本 `SPREAD_PCT=0.15` 事前寫死。
+    🔴 **沒給 `--margin-a/--margin-b` 時工具會拒絕判定**，只印損益與最壞情形——
+    保證金追繳是這個策略唯一真正會殺死人的地方，而回測會在爆倉後若無其事地
+    繼續交易，於是「平均報酬」照樣漂亮。給半套判定會讓人誤以為驗證過了。
+    ⚠️ A值/B值要去期交所抄（會隨市況調整）。**Claude 的容器被 egress proxy
+    擋住 taifex.com.tw，抄不到，這一步只能由使用者做。**
+    ⚠️ 已知近似：用加權指數收盤價當標的與到期結算價（真實 TXO 結算價是到期日
+    開盤集合競價平均），且忽略期現基差與盤中追繳 → 結果只能當量級參考。
 - 新策略一律先過三關再談部署。別急著上真錢。
 - **改策略邏輯前先問：這是 bug 還是策略改動？** bug（實盤與回測不一致）直接修；
   策略改動一律先參數化、預設關閉、寫死標準後跑三關，通過才啟用。

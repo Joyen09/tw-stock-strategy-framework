@@ -116,7 +116,9 @@ def main():
     sess = Counter(all_df.get("trading_session", pd.Series(dtype=str)).fillna("(空)"))
     for k, v in sess.most_common():
         print(f"  {_pad(k, 20)}{v:>10,} 列（{v / len(all_df):.1%}）")
-    print(f"  → 回測必須固定只用一種，建議 'regular_trading'／日盤。")
+    main_name = sess.most_common(1)[0][0] if sess else "?"
+    print(f"  → 回測必須固定只用一種。實測主時段叫 {main_name!r}"
+          f"（2026-10 實測是 'position'，不是 'regular_trading'——別憑猜測寫死）。")
 
     # ── 2. 月選 vs 週選 ──
     print("\n" + "=" * 72)
@@ -158,8 +160,13 @@ def main():
     print(f"  有的價格欄位：{', '.join(have)}")
     if "settlement_price" in reg.columns:
         sp = pd.to_numeric(reg["settlement_price"], errors="coerce").fillna(0)
-        print(f"  settlement_price = 0 的比例：{(sp == 0).mean():.1%}"
+        zero = (sp == 0).mean()
+        print(f"  settlement_price = 0 的比例：{zero:.1%}"
               f"（若接近 100%，這欄在這個時段不可用）")
+        if zero < 0.2:
+            print("  ✅ 結算價可用——這比 close 更適合「每日評價持倉」：")
+            print("     沒成交的履約價 close=0，拿它評價會把部位當成一文不值；")
+            print("     結算價是期交所給的理論價，冷門履約價也有值。")
     missing = [c for c in ("bid", "ask", "bid_price", "ask_price") if c in reg.columns]
     print(f"  買賣報價（bid/ask）：{'有 ' + ', '.join(missing) if missing else '**沒有**'}")
     print()
