@@ -329,6 +329,8 @@ python tools/revalidate_deployed.py                   # 重驗實盤三組設定
 python tools/ma_filter_robustness.py                  # 年線濾網是真的還是這段歷史的運氣（只打 1 次 API）
 python tools/dca_compare.py                           # 定期定額要不要加均線濾網（只打 1 次 API）
 python main.py dca --symbol 0050 --amount 10000 --paper-file paper_dca.json --notify   # 第四帳戶：定期定額（每月扣一次，冪等）
+python tools/dip_add_compare.py                       # 衛星層①機械式逢跌加碼值不值得（只打 1 次 API）
+python tools/txo_data_probe.py                        # 衛星層②選擇權：先確認資料拿不拿得到
 python tools/churn_check.py                           # 交易品質健檢（來回洗、持有天數、勝率）
 python tools/why_idle.py --strategy lynch --universe mid100 --paper-file paper_lynch_mid100.json --regime --max-positions 2 --budget 10000   # 帳戶為什麼沒交易
 ```
@@ -423,6 +425,25 @@ deploy/               # systemd: stockbot(lynch-tw50) / stockbot-livermore / sto
   低點，是對定期定額最有利的進場點。長期規劃用大盤 CAGR 約 10% 比較誠實，
   而且一樣不保證。另外「期初一次買進」期末市值最高，是因為那 226 萬從第一天
   就全額在市場裡（複利 18.8 年），不是報酬率比較好——那一欄不是對等比較。
+- 🧭 **衛星層方向（2026-10-06 起）**：使用者本來就有定期定額核心倉位，要的是
+  「核心之上再加一層」。前提講清楚：這幾週測掉的是**用預測去選股/擇時**
+  （財報、PEG、名人規則、新聞、停利全無邊）。所以衛星層只做**不靠預測**的東西。
+  - ① **機械式逢跌加碼**（`tools/dip_add_compare.py`，已實作待跑）：
+    每月保留 r 比例進現金池，大盤從近 250 日高點回落達門檻時階梯式投入。
+    核心問題不是「跌時加碼好不好」（當然好），而是**為了那幾次加碼長期預留現金
+    划不划算**——所以報表會印「平均現金拖累」，判定看整體 IRR。
+    標準事前寫死：IRR 必須**嚴格高於**純定期定額（打平不算贏，它多了複雜度）、
+    回撤不惡化超過 2pp、加碼至少真的觸發 3 次（防空過）。
+    刻意設計：池子沒錢時那一層不算已觸發，留著下次有錢再用——崩盤常持續數月，
+    新存的錢該進場買便宜而不是躺著；但一輪下跌最多觸發 len(tiers) 次，
+    避免變成無限攤平。
+  - ② **賣選擇權收權利金**（`tools/txo_data_probe.py`，先探資料）：
+    波動率風險溢酬是少數站得住腳的溢酬，但風險形狀是「平常小賺、偶爾巨虧」，
+    左尾極肥。**沒有歷史報價就沒有回測，沒有回測就不該碰真錢。**
+    FinMind 選擇權資料很可能在贊助會員層（之前評估 spec 策略就卡過），
+    所以第一步是探針而不是寫程式。拿得到才談：先補 txo-options-lab 的
+    `config/margin.toml`（A/B/C 保證金目前是 0），再寫回測，重點看**最大單日
+    虧損與保證金追繳會不會爆倉**，而不是平均報酬漂不漂亮。
 - 新策略一律先過三關再談部署。別急著上真錢。
 - **改策略邏輯前先問：這是 bug 還是策略改動？** bug（實盤與回測不一致）直接修；
   策略改動一律先參數化、預設關閉、寫死標準後跑三關，通過才啟用。
