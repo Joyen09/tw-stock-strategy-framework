@@ -331,6 +331,7 @@ python tools/dca_compare.py                           # 定期定額要不要加
 python main.py dca --symbol 0050 --amount 10000 --paper-file paper_dca.json --notify   # 第四帳戶：定期定額（每月扣一次，冪等）
 python tools/dip_add_compare.py                       # 衛星層①機械式逢跌加碼值不值得（只打 1 次 API）
 python tools/txo_data_probe.py                        # 衛星層②選擇權：先確認資料拿不拿得到
+python tools/txo_data_survey.py                       # 選擇權資料品質盤點（寫回測前必跑）
 python tools/churn_check.py                           # 交易品質健檢（來回洗、持有天數、勝率）
 python tools/why_idle.py --strategy lynch --universe mid100 --paper-file paper_lynch_mid100.json --regime --max-positions 2 --budget 10000   # 帳戶為什麼沒交易
 ```
@@ -459,7 +460,20 @@ deploy/               # systemd: stockbot(lynch-tw50) / stockbot-livermore / sto
     `data_id=`，三個 API 全部 TypeError，卻被印成「拿不到選擇權歷史資料」。
     已修成用 `inspect.signature` 自動對出正確的參數名（option_id / futures_id /
     data_id 各版本不同），並把「呼叫方式錯」獨立成一個狀態 🐞 直接 return 2，
-    不准再冒充結論。**選擇權可不可行目前仍未知，要重跑探針才算。**
+    不准再冒充結論。
+    ✅ **重跑後資料拿得到（2026-10-06）**：`taiwan_option_daily(option_id="TXO")`
+    有 date / contract_date / strike_price / call_put / OHLC / settlement_price /
+    open_interest / trading_session，回測需要的欄位齊全。
+    🔴 **但三列樣本就露出四個會讓回測變垃圾、而且看起來不會有問題的坑**
+    （已寫成 `tools/txo_data_survey.py` 盤點，**寫回測前必跑**）：
+    1. `trading_session` 有 `after_market`——日盤與盤後混算會讓部位與損益翻倍
+    2. `contract_date` 出現 `202609F4` 這種**週選**，和月選 `202609` 混在一起；
+       到期行為不同，不分開等於在算一個不存在的商品
+    3. 大量 `close=0 / volume=0 / open_interest=0` 的深價外履約價——
+       不過濾就會「用 0 元賣出選擇權」，而**想賣的價外合約常常正是沒人交易的那些**
+    4. 🔴 **沒有 bid/ask，只有 OHLC 與結算價。** 選擇權價差極寬（價外常達權利金
+       的 10~30%），用收盤價假設賣得掉會**系統性高估賣方收益**——這對「賣選擇權」
+       是最致命的偏差。價差成本必須事前寫進標準，不可看到結果再調鬆。
 - 新策略一律先過三關再談部署。別急著上真錢。
 - **改策略邏輯前先問：這是 bug 還是策略改動？** bug（實盤與回測不一致）直接修；
   策略改動一律先參數化、預設關閉、寫死標準後跑三關，通過才啟用。
