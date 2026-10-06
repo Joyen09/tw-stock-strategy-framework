@@ -41,29 +41,73 @@ NEEDED = {
     "未平倉": ("open_interest",),
 }
 
-# 依重要性排序：前兩個是選擇權本體，期貨是 Black-76 的標的遠期價
+# 依重要性排序：前兩個是選擇權本體，期貨是 Black-76 的標的遠期價。
+# 第三個欄位是「商品代號」，參數名**不寫死**——不同 FinMind 版本叫
+# data_id / option_id / futures_id，第一版寫死 data_id 結果三個全部 TypeError，
+# 卻被印成「拿不到選擇權歷史資料」。那是把自己的 bug 當成資料結論，
+# 是這個 session 反覆在修的同一類錯：**失敗要歸因正確，不然比沒測更糟。**
 PROBES = [
-    ("選擇權日成交 (TXO)", "taiwan_option_daily", dict(data_id="TXO")),
-    ("選擇權法人未平倉", "taiwan_option_institutional_investors", dict(data_id="TXO")),
-    ("期貨日成交 (TX)", "taiwan_futures_daily", dict(data_id="TX")),
+    ("選擇權日成交 (TXO)", "taiwan_option_daily", "TXO"),
+    ("選擇權法人未平倉", "taiwan_option_institutional_investors", "TXO"),
+    ("期貨日成交 (TX)", "taiwan_futures_daily", "TX"),
 ]
 
+# 候選的「商品代號」參數名，照順序比對實際簽章
+ID_PARAMS = ("option_id", "futures_id", "data_id", "stock_id", "symbol")
 
-def _probe(api, label, method, kwargs, start, end):
+
+def _id_kwarg(fn, value):
+    """看函式真正的簽章決定商品代號要用哪個參數名；找不到就不傳。"""
+    import inspect
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return {}, "（看不到簽章）"
+    for name in ID_PARAMS:
+        if name in params:
+            return {name: value}, f"{name}={value!r}"
+    return {}, "（簽章沒有商品代號參數，只傳日期）"
+
+
+def _pad(text: str, width: int) -> str:
+    """靠左補到「顯示寬度」。中文在終端算兩格，用 len() 補會排不齊。"""
+    import unicodedata
+    w = sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+    return text + " " * max(width - w, 0)
+
+
+def _probe(api, label, method, data_id, start, end):
+    """回傳 (狀態, 說明, DataFrame)。
+
+    狀態要能分辨三件完全不同的事，不可混為一談：
+      「呼叫方式錯」= 本程式的 bug，**不是**資料拿不到
+      「權限不足」/「空資料」= 真的拿不到
+      「可用」= 拿到了
+    """
+    import inspect
+
     fn = getattr(api, method, None)
     if fn is None:
         return "方法不存在", f"DataLoader 沒有 {method}()（FinMind 版本太舊？）", None
+    kwargs, how = _id_kwarg(fn, data_id)
+    try:
+        sig = str(inspect.signature(fn))
+    except (TypeError, ValueError):
+        sig = "?"
     try:
         df = fn(start_date=start, end_date=end, **kwargs)
+    except TypeError as e:
+        # 參數對不上 → 是本程式呼叫錯，不是資料問題。把簽章印出來好修。
+        return "呼叫方式錯", f"{e}｜實際簽章 {method}{sig}", None
     except Exception as e:
         msg = str(e)
         low = msg.lower()
         if any(k in low for k in ("sponsor", "權限", "permission", "upgrade", "402", "403")):
-            return "權限不足", f"需要付費/贊助會員：{msg[:120]}", None
-        return "錯誤", msg[:160], None
+            return "權限不足", f"需要付費/贊助會員：{msg[:110]}", None
+        return "錯誤", f"{msg[:130]}｜簽章 {method}{sig}", None
     if df is None or getattr(df, "empty", True):
-        return "空資料", "有權限但這段期間沒回資料（換日期或這張表免費層不給）", None
-    return "可用", f"{len(df)} 列、{len(df.columns)} 欄", df
+        return "空資料", f"有權限但沒回資料（{how}；換日期或免費層不給這張表）", None
+    return "可用", f"{len(df)} 列、{len(df.columns)} 欄（{how}）", df
 
 
 def main():
@@ -89,12 +133,22 @@ def main():
     print(f"探測期間 {start} ~ {end}\n")
     print("=" * 72)
     results = {}
-    for label, method, kwargs in PROBES:
-        status, detail, df = _probe(api, label, method, kwargs, start, end)
-        icon = {"可用": "✅", "空資料": "⚠️", "權限不足": "🔴",
-                "方法不存在": "🔴", "錯誤": "🔴"}[status]
-        print(f"{icon} {label:<22} {status:<8} {detail}")
+    for label, method, data_id in PROBES:
+        status, detail, df = _probe(api, label, method, data_id, start, end)
+        icon = {"可用": "✅", "空資料": "⚠️", "權限不足": "🔴", "方法不存在": "🔴",
+                "呼叫方式錯": "🐞", "錯誤": "🔴"}[status]
+        print(f"{icon} {_pad(label, 22)}{status:<10} {detail}")
         results[label] = (status, df)
+
+    # 🐞 一律先修程式再談結論——不可以把自己的 bug 說成「資料拿不到」
+    bugs = [k for k, (st, _) in results.items() if st == "呼叫方式錯"]
+    if bugs:
+        print("\n" + "=" * 72)
+        print("🐞 **這次沒有測到資料，是本程式呼叫方式錯了**："
+              f"{'、'.join(bugs)}")
+        print("   上面有印出實際簽章，照它修 ID_PARAMS 或 PROBES 再跑一次。")
+        print("   **不要把這個當成「選擇權做不了」的結論。**")
+        return 2
 
     # 欄位檢查：只有「可用」的選擇權表才值得看
     opt_status, opt_df = results.get("選擇權日成交 (TXO)", ("", None))
