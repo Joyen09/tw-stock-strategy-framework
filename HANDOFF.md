@@ -324,6 +324,7 @@ python tools/validate_lynch_buffer.py --universe tw50 # 策略參數改動的三
 python tools/validate_take_profit.py --universe tw50  # 「賺 N% 就走」該不該開的三關驗證
 python tools/revalidate_deployed.py                   # 重驗實盤三組設定還站不站得住
 python tools/ma_filter_robustness.py                  # 年線濾網是真的還是這段歷史的運氣（只打 1 次 API）
+python tools/dca_compare.py                           # 定期定額要不要加均線濾網（只打 1 次 API）
 python tools/churn_check.py                           # 交易品質健檢（來回洗、持有天數、勝率）
 python tools/why_idle.py --strategy lynch --universe mid100 --paper-file paper_lynch_mid100.json --regime --max-positions 2 --budget 10000   # 帳戶為什麼沒交易
 ```
